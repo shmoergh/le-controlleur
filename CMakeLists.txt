@@ -18,6 +18,21 @@ include(brain-sdk/pico_sdk_import.cmake)
 
 project(brain-basic-midi2cv C CXX ASM)
 
+option(LE_CONTROLLEUR_DEBUG_LOG "Enable debug logging" ON)
+set(LE_CONTROLLEUR_DEBUG_LEVEL 1 CACHE STRING "Debug verbosity: 0=error,1=info,2=trace")
+set(LE_CONTROLLEUR_VERSION "0.1.0-dev" CACHE STRING "Firmware version string")
+
+execute_process(
+	COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} rev-parse --short HEAD
+	OUTPUT_VARIABLE LE_CONTROLLEUR_GIT_HASH
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET
+)
+
+if(NOT LE_CONTROLLEUR_GIT_HASH)
+	set(LE_CONTROLLEUR_GIT_HASH "unknown")
+endif()
+
 # Initialize the Pico SDK
 pico_sdk_init()
 
@@ -32,6 +47,18 @@ target_link_libraries(brain-basic-midi2cv
 	brain-utils
 	brain-ui
 	brain-io)
+
+if(LE_CONTROLLEUR_DEBUG_LOG)
+	target_compile_definitions(brain-basic-midi2cv PRIVATE LE_CONTROLLEUR_DEBUG_LOG=1)
+else()
+	target_compile_definitions(brain-basic-midi2cv PRIVATE LE_CONTROLLEUR_DEBUG_LOG=0)
+endif()
+
+target_compile_definitions(brain-basic-midi2cv PRIVATE
+	LE_CONTROLLEUR_DEBUG_LEVEL=${LE_CONTROLLEUR_DEBUG_LEVEL}
+	LE_CONTROLLEUR_VERSION="${LE_CONTROLLEUR_VERSION}"
+	LE_CONTROLLEUR_GIT_HASH="${LE_CONTROLLEUR_GIT_HASH}"
+)
 
 pico_enable_stdio_usb(brain-basic-midi2cv 1)
 pico_enable_stdio_uart(brain-basic-midi2cv 1)

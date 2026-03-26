@@ -1,4 +1,5 @@
 #include "basic-midi2cv.h"
+#include "debug-log.h"
 
 BasicMidi2CV::BasicMidi2CV(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel) :
 	button_a_(GPIO_BRAIN_BUTTON_1),
@@ -50,6 +51,7 @@ BasicMidi2CV::BasicMidi2CV(brain::io::AudioCvOutChannel cv_channel, uint8_t midi
 
 	// Panic
 	panic_timer_start_ = 0;
+	telemetry_last_log_time_ = 0;
 
 	// Load settings
 	mode_ = MidiToCV::Mode::kDefault;
@@ -195,6 +197,8 @@ void BasicMidi2CV::update() {
 			break;
 		}
 	}
+
+	log_runtime_snapshot();
 }
 
 State BasicMidi2CV::get_state() const {
@@ -299,4 +303,68 @@ void BasicMidi2CV::load_settings() {
 	uint8_t pot_c_value = pots_.get(POT_MODE);
 	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
 	set_mode(mode_);
+}
+
+void BasicMidi2CV::log_runtime_snapshot() {
+	absolute_time_t now = get_absolute_time();
+
+	if (telemetry_last_log_time_ != 0) {
+		int64_t elapsed_ms = absolute_time_diff_us(telemetry_last_log_time_, now) / 1000;
+		if (elapsed_ms < static_cast<int64_t>(RUNTIME_SNAPSHOT_INTERVAL_MS)) {
+			return;
+		}
+	}
+
+	telemetry_last_log_time_ = now;
+
+	LOG_INFO(
+		"APP",
+		"snapshot state=%s midi_ch=%u cv=%s cc_mode=%s note_playing=%u tempo=n/a swing=n/a randomness=n/a length=n/a play=n/a",
+		state_to_string(state_),
+		midi_channel_,
+		cv_channel_to_string(cv_channel_),
+		mode_to_string(mode_),
+		is_note_playing() ? 1 : 0
+	);
+}
+
+const char* BasicMidi2CV::state_to_string(State state) const {
+	switch (state) {
+		case State::kDefault:
+			return "default";
+		case State::kSetMidiChannel:
+			return "set-midi-channel";
+		case State::kSetCVChannel:
+			return "set-cv-channel";
+		case State::kPanicStarted:
+			return "panic-started";
+		default:
+			return "unknown";
+	}
+}
+
+const char* BasicMidi2CV::cv_channel_to_string(brain::io::AudioCvOutChannel cv_channel) const {
+	switch (cv_channel) {
+		case brain::io::AudioCvOutChannel::kChannelA:
+			return "A";
+		case brain::io::AudioCvOutChannel::kChannelB:
+			return "B";
+		default:
+			return "unknown";
+	}
+}
+
+const char* BasicMidi2CV::mode_to_string(MidiToCV::Mode mode) const {
+	switch (mode) {
+		case MidiToCV::Mode::kDefault:
+			return "velocity";
+		case MidiToCV::Mode::kModWheel:
+			return "modwheel";
+		case MidiToCV::Mode::kUnison:
+			return "unison";
+		case MidiToCV::Mode::kDuo:
+			return "duo";
+		default:
+			return "unknown";
+	}
 }

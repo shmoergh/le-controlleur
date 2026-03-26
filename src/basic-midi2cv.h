@@ -36,6 +36,7 @@ constexpr uint8_t POT_FUNCTION_ID_MODE = 3;
 constexpr uint8_t POT_FUNCTION_PICKUP_HYSTERESIS = 1;
 constexpr uint8_t NUM_POTS = 3;
 constexpr uint32_t PANIC_HOLD_THRESHOLD_MS = 2000;
+constexpr uint32_t RUNTIME_SNAPSHOT_INTERVAL_MS = 500;
 
 enum State {
 	kDefault = 0,
@@ -69,6 +70,7 @@ private:
 	uint8_t playhead_led_;
 	bool reset_leds_;
 	absolute_time_t panic_timer_start_;
+	absolute_time_t telemetry_last_log_time_;
 
 	void set_leds_from_mask(uint8_t mask);
 
@@ -87,6 +89,11 @@ private:
 	void update_cv_channel_setting();
 	void update_cc_setting();
 	void load_settings();
+	void log_runtime_snapshot();
+
+	const char* state_to_string(State state) const;
+	const char* cv_channel_to_string(brain::io::AudioCvOutChannel cv_channel) const;
+	const char* mode_to_string(MidiToCV::Mode mode) const;
 };
 
 #endif
