@@ -27,6 +27,9 @@ SequencerEngine::SequencerEngine() :
 	mutation_probability_(0.0f),
 	last_raw_voltage_(0.0f),
 	last_quantized_voltage_(0.0f),
+	pot_led_overlay_active_(false),
+	pot_led_overlay_last_change_us_(0),
+	last_pot_raw_values_{0, 0, 0},
 	gate_history_fifo_{0, 0, 0, 0, 0, 0},
 	gate_history_text_{'0', '0', '0', '0', '0', '0', '\0'},
 	rng_state_a_(0x12345678u),
@@ -45,6 +48,7 @@ void SequencerEngine::update() {
 	update_pot_mappings();
 
 	const uint64_t now_us = time_us_64();
+	update_pot_led_overlay(now_us);
 
 	if (gate_active_ && now_us >= gate_off_time_us_) {
 		gate_.set(false);
@@ -178,6 +182,9 @@ void SequencerEngine::init_io() {
 	button_led_.init();
 	button_led_.off();
 	reset_gate_history();
+	last_pot_raw_values_[POT_INDEX_BPM] = pots_.get(POT_INDEX_BPM);
+	last_pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION] = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	last_pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH] = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
 
 	init_pot_functions();
 	initialized_ = true;
@@ -377,10 +384,125 @@ void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
 	(void) mutated_gate;
 }
 
+void SequencerEngine::update_pot_led_overlay(uint64_t now_us) {
+	uint8_t moved_pot = NUM_POTS;
+	uint8_t max_delta = 0;
+
+	for (uint8_t pot_index = 0; pot_index < NUM_POTS; ++pot_index) {
+		const uint8_t raw = pots_.get(pot_index);
+		const uint8_t previous = last_pot_raw_values_[pot_index];
+		const uint8_t delta = (raw > previous) ? (raw - previous) : (previous - raw);
+		if (delta > max_delta) {
+			max_delta = delta;
+			moved_pot = pot_index;
+		}
+		last_pot_raw_values_[pot_index] = raw;
+	}
+
+	if (moved_pot < NUM_POTS && max_delta >= POT_LED_ACTIVITY_RAW_THRESHOLD) {
+		leds_.set_from_mask(active_pot_led_mask(moved_pot));
+		pot_led_overlay_active_ = true;
+		pot_led_overlay_last_change_us_ = now_us;
+		return;
+	}
+
+	if (!pot_led_overlay_active_) {
+		return;
+	}
+
+	if ((now_us - pot_led_overlay_last_change_us_) < POT_LED_OVERLAY_HOLD_US) {
+		return;
+	}
+
+	pot_led_overlay_active_ = false;
+	leds_.set_from_mask(gate_history_mask());
+}
+
+float SequencerEngine::active_pot_percent(uint8_t pot_index) const {
+	float percent = 0.0f;
+
+	switch (pot_index) {
+		case POT_INDEX_BPM:
+			if (shift_active_) {
+				percent = (SWING_MAX > 0.0f) ? (swing_amount_ / SWING_MAX) : 0.0f;
+			} else {
+				percent = static_cast<float>(bpm_ - BPM_MIN) / static_cast<float>(BPM_MAX - BPM_MIN);
+			}
+			break;
+
+		case POT_INDEX_RANGE_OR_QUANTIZATION:
+			if (shift_active_) {
+				percent = static_cast<float>(static_cast<uint8_t>(quantization_mode_))
+					/ static_cast<float>(QUANTIZATION_MODE_COUNT - 1);
+			} else {
+				percent = static_cast<float>(range_octaves_) / static_cast<float>(RANGE_OCTAVES_MAX);
+			}
+			break;
+
+		case POT_INDEX_RANDOMNESS_OR_LENGTH:
+			if (shift_active_) {
+				percent = static_cast<float>(sequence_a_.length - 1) / 63.0f;
+			} else {
+				percent = static_cast<float>(randomness_pot_value_) / 255.0f;
+			}
+			break;
+
+		default:
+			percent = 0.0f;
+			break;
+	}
+
+	if (percent < 0.0f) {
+		return 0.0f;
+	}
+	if (percent > 1.0f) {
+		return 1.0f;
+	}
+	return percent;
+}
+
+uint8_t SequencerEngine::active_pot_led_mask(uint8_t pot_index) const {
+	// In shift+pot2 (quantization selection), show one-hot LED index 1..6.
+	if (shift_active_ && pot_index == POT_INDEX_RANGE_OR_QUANTIZATION) {
+		uint8_t mode_index = static_cast<uint8_t>(quantization_mode_);
+		if (mode_index >= brain::ui::NO_OF_LEDS) {
+			mode_index = brain::ui::NO_OF_LEDS - 1;
+		}
+		return static_cast<uint8_t>(1u << mode_index);
+	}
+
+	return percent_to_led_mask(active_pot_percent(pot_index));
+}
+
+uint8_t SequencerEngine::percent_to_led_mask(float percent) const {
+	if (percent <= 0.0f) {
+		return 0;
+	}
+	if (percent > 1.0f) {
+		percent = 1.0f;
+	}
+
+	uint8_t lit_count = static_cast<uint8_t>(lroundf(percent * static_cast<float>(brain::ui::NO_OF_LEDS)));
+	if (lit_count == 0) {
+		lit_count = 1;
+	}
+	if (lit_count > brain::ui::NO_OF_LEDS) {
+		lit_count = brain::ui::NO_OF_LEDS;
+	}
+
+	uint8_t mask = 0;
+	for (uint8_t i = 0; i < lit_count; ++i) {
+		mask |= static_cast<uint8_t>(1u << i);
+	}
+	return mask;
+}
+
 void SequencerEngine::reset_gate_history() {
 	gate_history_fifo_.fill(0);
 	refresh_gate_history_view();
-	leds_.off_all();
+	if (!pot_led_overlay_active_) {
+		leds_.off_all();
+	}
 }
 
 void SequencerEngine::push_gate_history(bool gate_high) {
@@ -389,7 +511,9 @@ void SequencerEngine::push_gate_history(bool gate_high) {
 	}
 	gate_history_fifo_[brain::ui::NO_OF_LEDS - 1] = gate_high ? 1 : 0;
 	refresh_gate_history_view();
-	leds_.set_from_mask(gate_history_mask());
+	if (!pot_led_overlay_active_) {
+		leds_.set_from_mask(gate_history_mask());
+	}
 }
 
 void SequencerEngine::refresh_gate_history_view() {
@@ -450,6 +574,11 @@ void SequencerEngine::reset_transport() {
 	tick_counter_ = 0;
 	current_step_interval_us_ = tick_interval_us_;
 	gate_.set(false);
+	pot_led_overlay_active_ = false;
+	pot_led_overlay_last_change_us_ = 0;
+	last_pot_raw_values_[POT_INDEX_BPM] = pots_.get(POT_INDEX_BPM);
+	last_pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION] = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	last_pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH] = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
 	reset_gate_history();
 	button_led_.off();
 }

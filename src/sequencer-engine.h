@@ -77,6 +77,8 @@ private:
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
 	static constexpr uint32_t BUTTON_LED_BLINK_INTERVAL_MS = 40;
 	static constexpr float RANDOM_VOLTAGE_MAX = 5.0f;
+	static constexpr uint64_t POT_LED_OVERLAY_HOLD_US = 1000ULL * 1000ULL;
+	static constexpr uint8_t POT_LED_ACTIVITY_RAW_THRESHOLD = 3;
 
 	Sequence sequence_a_;
 	std::array<Step, Sequence::kMaxSteps> sequence_b_steps_;
@@ -105,6 +107,9 @@ private:
 	float mutation_probability_;
 	float last_raw_voltage_;
 	float last_quantized_voltage_;
+	bool pot_led_overlay_active_;
+	uint64_t pot_led_overlay_last_change_us_;
+	std::array<uint8_t, NUM_POTS> last_pot_raw_values_;
 	std::array<uint8_t, brain::ui::NO_OF_LEDS> gate_history_fifo_;
 	char gate_history_text_[brain::ui::NO_OF_LEDS + 1];
 	uint32_t rng_state_a_;
@@ -120,6 +125,10 @@ private:
 	void update_range_or_quantization_from_pot2(bool force_apply = false);
 	void update_randomness_or_length_from_pot3(bool force_apply = false);
 	void apply_mutation_for_step(uint8_t step_index);
+	void update_pot_led_overlay(uint64_t now_us);
+	float active_pot_percent(uint8_t pot_index) const;
+	uint8_t active_pot_led_mask(uint8_t pot_index) const;
+	uint8_t percent_to_led_mask(float percent) const;
 	void reset_gate_history();
 	void push_gate_history(bool gate_high);
 	void refresh_gate_history_view();
