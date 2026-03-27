@@ -3,6 +3,8 @@
 #include <cstring>
 #include <stdio.h>
 
+#include "settings-storage.h"
+
 AppController::AppController() :
 	button_a_(GPIO_BRAIN_BUTTON_1),
 	button_b_(GPIO_BRAIN_BUTTON_2),
@@ -28,6 +30,12 @@ AppController::AppController() :
 	button_a_.set_on_release([this]() { on_button_a_release(); });
 	button_b_.set_on_press([this]() { on_button_b_press(); });
 	button_b_.set_on_release([this]() { on_button_b_release(); });
+
+	uint8_t persisted_mode = static_cast<uint8_t>(AppMode::kMidiToCv);
+	if (load_persisted_app_mode(persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
+		mode_ = AppMode::kSequencer;
+		sequencer_engine_.on_mode_enter();
+	}
 }
 
 void AppController::update() {
@@ -347,6 +355,8 @@ void AppController::set_mode(AppMode mode) {
 	if (mode_ == AppMode::kSequencer) {
 		sequencer_engine_.on_mode_enter();
 	}
+
+	save_persisted_app_mode(static_cast<uint8_t>(mode_));
 
 	midi_to_cv_engine_.play_startup_animation();
 }
