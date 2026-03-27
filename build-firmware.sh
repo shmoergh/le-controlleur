@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_NAME="brain-basic-midi2cv"
+TARGET_NAME="le_controlleur"
+OUTPUT_PREFIX="le-controlleur"
 DEBUG_LOG="ON"
 DEBUG_LEVEL="1"
 
@@ -72,7 +73,7 @@ build_target() {
 echo "Debug logging: ${DEBUG_LOG} (level ${DEBUG_LEVEL})"
 
 # Build order requested by user: Pico first, then Pico 2.
-build_target "pico" "rp2040" "build-pico" "brain-basic-midi2cv-pico.uf2"
-build_target "pico2" "rp2350-arm-s" "build-pico-2" "brain-basic-midi2cv-pico-2.uf2"
+build_target "pico" "rp2040" "build-pico" "${OUTPUT_PREFIX}-pico.uf2"
+build_target "pico2" "rp2350-arm-s" "build-pico-2" "${OUTPUT_PREFIX}-pico-2.uf2"
 
 echo "Done."

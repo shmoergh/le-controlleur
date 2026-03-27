@@ -1,10 +1,10 @@
-# Basic MIDI to CV
+# Le Controlleur
 
-A versatile MIDI to CV converter firmware for the Shmøergh Moduleur Brain module. Converts incoming MIDI note messages to 1V/octave CV pitch and gate signals, with configurable MIDI channel and CV output routing.
+A versatile firmware for the Shmøergh Moduleur Brain module. Current functionality includes MIDI to CV conversion, with architecture evolving toward dual-mode operation.
 
 ## Install
 
-Flash the `brain-basic-midi2cv.uf2` file to your Brain module by holding the BOOTSEL button while connecting it to your computer, then copy the .uf2 file to the mounted drive. If you're using a Pico 2, use the one with `pico-2` in the filename.
+Flash `le-controlleur-pico.uf2` (or `le-controlleur-pico-2.uf2` for Pico 2) to your Brain module by holding the BOOTSEL button while connecting it to your computer, then copy the `.uf2` file to the mounted drive.
 
 ## Features
 
@@ -82,10 +82,7 @@ If MIDI notes get stuck (e.g., if the MIDI cable is disconnected during a note):
 ## Build
 
 ```bash
-mkdir build
-cd build
-cmake ..
-make
+./build-firmware.sh
 ```
 
 ## Development

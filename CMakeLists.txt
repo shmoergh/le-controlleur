@@ -16,7 +16,7 @@ endif()
 # Include Pico SDK (from brain-sdk subdirectory)
 include(brain-sdk/pico_sdk_import.cmake)
 
-project(brain-basic-midi2cv C CXX ASM)
+project(le_controlleur C CXX ASM)
 
 option(LE_CONTROLLEUR_DEBUG_LOG "Enable debug logging" ON)
 set(LE_CONTROLLEUR_DEBUG_LEVEL 1 CACHE STRING "Debug verbosity: 0=error,1=info,2=trace")
@@ -39,9 +39,9 @@ pico_sdk_init()
 # Add brain-sdk which includes brain libraries
 add_subdirectory(brain-sdk)
 
-add_executable(brain-basic-midi2cv ${FILES})
+add_executable(le_controlleur ${FILES})
 
-target_link_libraries(brain-basic-midi2cv
+target_link_libraries(le_controlleur
 	pico_stdlib
 	brain-common
 	brain-utils
@@ -49,17 +49,17 @@ target_link_libraries(brain-basic-midi2cv
 	brain-io)
 
 if(LE_CONTROLLEUR_DEBUG_LOG)
-	target_compile_definitions(brain-basic-midi2cv PRIVATE LE_CONTROLLEUR_DEBUG_LOG=1)
+	target_compile_definitions(le_controlleur PRIVATE LE_CONTROLLEUR_DEBUG_LOG=1)
 else()
-	target_compile_definitions(brain-basic-midi2cv PRIVATE LE_CONTROLLEUR_DEBUG_LOG=0)
+	target_compile_definitions(le_controlleur PRIVATE LE_CONTROLLEUR_DEBUG_LOG=0)
 endif()
 
-target_compile_definitions(brain-basic-midi2cv PRIVATE
+target_compile_definitions(le_controlleur PRIVATE
 	LE_CONTROLLEUR_DEBUG_LEVEL=${LE_CONTROLLEUR_DEBUG_LEVEL}
 	LE_CONTROLLEUR_VERSION="${LE_CONTROLLEUR_VERSION}"
 	LE_CONTROLLEUR_GIT_HASH="${LE_CONTROLLEUR_GIT_HASH}"
 )
 
-pico_enable_stdio_usb(brain-basic-midi2cv 1)
-pico_enable_stdio_uart(brain-basic-midi2cv 1)
-pico_add_extra_outputs(brain-basic-midi2cv)
+pico_enable_stdio_usb(le_controlleur 1)
+pico_enable_stdio_uart(le_controlleur 1)
+pico_add_extra_outputs(le_controlleur)

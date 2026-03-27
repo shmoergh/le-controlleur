@@ -7,7 +7,7 @@
 int main() {
 	stdio_init_all();
 
-	LOG_INFO("APP", "brain-basic-midi2cv started version=%s git=%s", LE_CONTROLLEUR_VERSION, LE_CONTROLLEUR_GIT_HASH);
+	LOG_INFO("APP", "le-controlleur started version=%s git=%s", LE_CONTROLLEUR_VERSION, LE_CONTROLLEUR_GIT_HASH);
 
 	BasicMidi2CV midi_2_cv(brain::io::AudioCvOutChannel::kChannelB, 1);
 
