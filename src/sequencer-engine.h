@@ -12,7 +12,7 @@
 #include "brain-ui/pots.h"
 
 struct Step {
-	float voltage;
+	uint16_t pitch_q8;
 	bool gate;
 };
 
@@ -68,7 +68,6 @@ private:
 	static constexpr uint8_t NUM_POTS = 3;
 	static constexpr uint16_t BPM_MIN = 60;
 	static constexpr uint16_t BPM_MAX = 240;
-	static constexpr float SWING_MAX = 0.25f;
 	static constexpr uint8_t RANGE_OCTAVES_MIN = 0;
 	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
 	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
@@ -76,7 +75,10 @@ private:
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
 	static constexpr uint32_t BUTTON_LED_BLINK_INTERVAL_MS = 40;
-	static constexpr float RANDOM_VOLTAGE_MAX = 5.0f;
+	static constexpr uint16_t PITCH_Q8_PER_SEMITONE = 256;
+	static constexpr uint16_t SEMITONES_PER_OCTAVE = 12;
+	static constexpr uint16_t SOURCE_RANGE_OCTAVES = 5;
+	static constexpr uint16_t RANDOM_MAX_Q8 = SOURCE_RANGE_OCTAVES * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
 	static constexpr uint64_t POT_LED_OVERLAY_HOLD_US = 1000ULL * 1000ULL;
 	static constexpr uint8_t POT_LED_ACTIVITY_RAW_THRESHOLD = 3;
 
@@ -100,11 +102,11 @@ private:
 	uint32_t current_step_interval_us_;
 	bool shift_active_;
 	bool last_shift_context_;
-	float swing_amount_;
+	uint8_t swing_pot_value_;
 	uint8_t range_octaves_;
 	QuantizationMode quantization_mode_;
 	uint8_t randomness_pot_value_;
-	float mutation_probability_;
+	uint8_t mutation_threshold_;
 	float last_raw_voltage_;
 	float last_quantized_voltage_;
 	bool pot_led_overlay_active_;
@@ -126,21 +128,22 @@ private:
 	void update_randomness_or_length_from_pot3(bool force_apply = false);
 	void apply_mutation_for_step(uint8_t step_index);
 	void update_pot_led_overlay(uint64_t now_us);
-	float active_pot_percent(uint8_t pot_index) const;
+	uint8_t active_pot_percent_255(uint8_t pot_index) const;
 	uint8_t active_pot_led_mask(uint8_t pot_index) const;
-	uint8_t percent_to_led_mask(float percent) const;
+	uint8_t percent_to_led_mask(uint8_t percent_255) const;
 	void reset_gate_history();
 	void push_gate_history(bool gate_high);
 	void refresh_gate_history_view();
 	uint8_t gate_history_mask() const;
 	void tick(uint64_t now_us);
 	void reset_transport();
-	float apply_pitch_range(float source_voltage) const;
-	float quantize_voltage(float voltage) const;
+	uint16_t apply_pitch_range(uint16_t source_q8) const;
+	uint16_t quantize_pitch(uint16_t pitch_q8) const;
 	uint32_t compute_next_step_interval_us() const;
 	static const char* quantization_mode_to_string(QuantizationMode mode);
 	static uint32_t next_random(uint32_t& state);
-	static float random_unit(uint32_t& state);
+	static uint8_t random_u8(uint32_t& state);
+	static float pitch_q8_to_voltage(uint16_t pitch_q8);
 };
 
 #endif

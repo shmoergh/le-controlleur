@@ -1,7 +1,5 @@
 #include "sequencer-engine.h"
 
-#include <cmath>
-
 #include "pico/time.h"
 
 #include "brain-ui/pots.h"
@@ -20,11 +18,11 @@ SequencerEngine::SequencerEngine() :
 	current_step_interval_us_(125000),
 	shift_active_(false),
 	last_shift_context_(false),
-	swing_amount_(0.0f),
+	swing_pot_value_(0),
 	range_octaves_(3),
 	quantization_mode_(QuantizationMode::kChromatic),
 	randomness_pot_value_(0),
-	mutation_probability_(0.0f),
+	mutation_threshold_(0),
 	last_raw_voltage_(0.0f),
 	last_quantized_voltage_(0.0f),
 	pot_led_overlay_active_(false),
@@ -129,29 +127,29 @@ void SequencerEngine::on_button_b_release() {
 }
 
 void SequencerEngine::init_sequence() {
-	sequence_a_.steps.fill({0.0f, false});
-	sequence_b_steps_.fill({0.0f, false});
+	sequence_a_.steps.fill({0, false});
+	sequence_b_steps_.fill({0, false});
 	sequence_a_.length = 8;
 	sequence_a_.position = 0;
 
 	// Deterministic bring-up pattern.
-	sequence_a_.steps[0] = {0.0f, true};
-	sequence_a_.steps[1] = {0.5f, false};
-	sequence_a_.steps[2] = {1.0f, true};
-	sequence_a_.steps[3] = {1.5f, false};
-	sequence_a_.steps[4] = {2.0f, true};
-	sequence_a_.steps[5] = {2.5f, false};
-	sequence_a_.steps[6] = {3.0f, true};
-	sequence_a_.steps[7] = {3.5f, true};
+	sequence_a_.steps[0] = {0u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_a_.steps[1] = {6u * PITCH_Q8_PER_SEMITONE, false};
+	sequence_a_.steps[2] = {12u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_a_.steps[3] = {18u * PITCH_Q8_PER_SEMITONE, false};
+	sequence_a_.steps[4] = {24u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_a_.steps[5] = {30u * PITCH_Q8_PER_SEMITONE, false};
+	sequence_a_.steps[6] = {36u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_a_.steps[7] = {42u * PITCH_Q8_PER_SEMITONE, true};
 
-	sequence_b_steps_[0] = {0.25f, true};
-	sequence_b_steps_[1] = {0.75f, true};
-	sequence_b_steps_[2] = {1.25f, false};
-	sequence_b_steps_[3] = {1.75f, true};
-	sequence_b_steps_[4] = {2.25f, false};
-	sequence_b_steps_[5] = {2.75f, true};
-	sequence_b_steps_[6] = {3.25f, false};
-	sequence_b_steps_[7] = {3.75f, true};
+	sequence_b_steps_[0] = {3u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_b_steps_[1] = {9u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_b_steps_[2] = {15u * PITCH_Q8_PER_SEMITONE, false};
+	sequence_b_steps_[3] = {21u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_b_steps_[4] = {27u * PITCH_Q8_PER_SEMITONE, false};
+	sequence_b_steps_[5] = {33u * PITCH_Q8_PER_SEMITONE, true};
+	sequence_b_steps_[6] = {39u * PITCH_Q8_PER_SEMITONE, false};
+	sequence_b_steps_[7] = {45u * PITCH_Q8_PER_SEMITONE, true};
 }
 
 void SequencerEngine::init_io() {
@@ -305,7 +303,7 @@ void SequencerEngine::update_swing_from_pot1(bool force_apply) {
 		return;
 	}
 	const uint8_t pot_value = pot_multi_function_.get_value(POT_FUNCTION_ID_SWING);
-	swing_amount_ = (static_cast<float>(pot_value) / 255.0f) * SWING_MAX;
+	swing_pot_value_ = pot_value;
 	current_step_interval_us_ = compute_next_step_interval_us();
 }
 
@@ -346,42 +344,29 @@ void SequencerEngine::update_randomness_or_length_from_pot3(bool force_apply) {
 	}
 
 	randomness_pot_value_ = pot_value;
-	mutation_probability_ = static_cast<float>(randomness_pot_value_) / 255.0f;
+	mutation_threshold_ = randomness_pot_value_;
 }
 
 void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
 	Step& step_a = sequence_a_.steps[step_index];
 	Step& step_b = sequence_b_steps_[step_index];
 
-	const float old_voltage_a = step_a.voltage;
-	const float old_voltage_b = step_b.voltage;
-	const bool old_gate = step_a.gate;
-
-	bool mutated_a = false;
-	bool mutated_b = false;
-	bool mutated_gate = false;
-
-	if (mutation_probability_ > 0.0f && random_unit(rng_state_a_) < mutation_probability_) {
-		step_a.voltage = random_unit(rng_state_a_) * RANDOM_VOLTAGE_MAX;
-		mutated_a = true;
+	if (mutation_threshold_ == 0) {
+		return;
 	}
 
-	if (mutation_probability_ > 0.0f && random_unit(rng_state_b_) < mutation_probability_) {
-		step_b.voltage = random_unit(rng_state_b_) * RANDOM_VOLTAGE_MAX;
-		mutated_b = true;
+	if (random_u8(rng_state_a_) < mutation_threshold_) {
+		step_a.pitch_q8 = static_cast<uint16_t>(next_random(rng_state_a_) % (RANDOM_MAX_Q8 + 1u));
 	}
 
-	if (mutation_probability_ > 0.0f && random_unit(rng_state_a_) < mutation_probability_) {
-		step_a.gate = random_unit(rng_state_a_) >= 0.4f;
-		mutated_gate = (step_a.gate != old_gate);
+	if (random_u8(rng_state_b_) < mutation_threshold_) {
+		step_b.pitch_q8 = static_cast<uint16_t>(next_random(rng_state_b_) % (RANDOM_MAX_Q8 + 1u));
 	}
 
-	(void) old_voltage_a;
-	(void) old_voltage_b;
-	(void) old_gate;
-	(void) mutated_a;
-	(void) mutated_b;
-	(void) mutated_gate;
+	if (random_u8(rng_state_a_) < mutation_threshold_) {
+		// Keep the historical ~60% probability for HIGH gate after mutation.
+		step_a.gate = random_u8(rng_state_a_) >= 102u;
+	}
 }
 
 void SequencerEngine::update_pot_led_overlay(uint64_t now_us) {
@@ -418,47 +403,47 @@ void SequencerEngine::update_pot_led_overlay(uint64_t now_us) {
 	leds_.set_from_mask(gate_history_mask());
 }
 
-float SequencerEngine::active_pot_percent(uint8_t pot_index) const {
-	float percent = 0.0f;
+uint8_t SequencerEngine::active_pot_percent_255(uint8_t pot_index) const {
+	uint32_t percent_255 = 0;
 
 	switch (pot_index) {
 		case POT_INDEX_BPM:
 			if (shift_active_) {
-				percent = (SWING_MAX > 0.0f) ? (swing_amount_ / SWING_MAX) : 0.0f;
+				percent_255 = swing_pot_value_;
 			} else {
-				percent = static_cast<float>(bpm_ - BPM_MIN) / static_cast<float>(BPM_MAX - BPM_MIN);
+				const uint16_t span = static_cast<uint16_t>(BPM_MAX - BPM_MIN);
+				percent_255 = (span == 0) ? 0 : ((static_cast<uint32_t>(bpm_ - BPM_MIN) * 255u) / span);
 			}
 			break;
 
 		case POT_INDEX_RANGE_OR_QUANTIZATION:
 			if (shift_active_) {
-				percent = static_cast<float>(static_cast<uint8_t>(quantization_mode_))
-					/ static_cast<float>(QUANTIZATION_MODE_COUNT - 1);
+				percent_255 =
+					(static_cast<uint32_t>(static_cast<uint8_t>(quantization_mode_)) * 255u)
+					/ static_cast<uint32_t>(QUANTIZATION_MODE_COUNT - 1);
 			} else {
-				percent = static_cast<float>(range_octaves_) / static_cast<float>(RANGE_OCTAVES_MAX);
+				percent_255 =
+					(static_cast<uint32_t>(range_octaves_) * 255u) / static_cast<uint32_t>(RANGE_OCTAVES_MAX);
 			}
 			break;
 
 		case POT_INDEX_RANDOMNESS_OR_LENGTH:
 			if (shift_active_) {
-				percent = static_cast<float>(sequence_a_.length - 1) / 63.0f;
+				percent_255 = (static_cast<uint32_t>(sequence_a_.length - 1u) * 255u) / 63u;
 			} else {
-				percent = static_cast<float>(randomness_pot_value_) / 255.0f;
+				percent_255 = randomness_pot_value_;
 			}
 			break;
 
 		default:
-			percent = 0.0f;
+			percent_255 = 0;
 			break;
 	}
 
-	if (percent < 0.0f) {
-		return 0.0f;
+	if (percent_255 > 255u) {
+		percent_255 = 255u;
 	}
-	if (percent > 1.0f) {
-		return 1.0f;
-	}
-	return percent;
+	return static_cast<uint8_t>(percent_255);
 }
 
 uint8_t SequencerEngine::active_pot_led_mask(uint8_t pot_index) const {
@@ -471,18 +456,16 @@ uint8_t SequencerEngine::active_pot_led_mask(uint8_t pot_index) const {
 		return static_cast<uint8_t>(1u << mode_index);
 	}
 
-	return percent_to_led_mask(active_pot_percent(pot_index));
+	return percent_to_led_mask(active_pot_percent_255(pot_index));
 }
 
-uint8_t SequencerEngine::percent_to_led_mask(float percent) const {
-	if (percent <= 0.0f) {
+uint8_t SequencerEngine::percent_to_led_mask(uint8_t percent_255) const {
+	if (percent_255 == 0) {
 		return 0;
 	}
-	if (percent > 1.0f) {
-		percent = 1.0f;
-	}
-
-	uint8_t lit_count = static_cast<uint8_t>(lroundf(percent * static_cast<float>(brain::ui::NO_OF_LEDS)));
+	uint8_t lit_count = static_cast<uint8_t>(
+		(static_cast<uint32_t>(percent_255) * brain::ui::NO_OF_LEDS + 127u) / 255u
+	);
 	if (lit_count == 0) {
 		lit_count = 1;
 	}
@@ -538,15 +521,17 @@ void SequencerEngine::tick(uint64_t now_us) {
 	apply_mutation_for_step(step_index);
 	const Step& step_a = sequence_a_.steps[step_index];
 	const Step& step_b = sequence_b_steps_[step_index];
-	const float scaled_voltage_a = apply_pitch_range(step_a.voltage);
-	const float scaled_voltage_b = apply_pitch_range(step_b.voltage);
-	const float output_voltage_a = quantize_voltage(scaled_voltage_a);
-	const float output_voltage_b = quantize_voltage(scaled_voltage_b);
+	const uint16_t scaled_pitch_q8_a = apply_pitch_range(step_a.pitch_q8);
+	const uint16_t scaled_pitch_q8_b = apply_pitch_range(step_b.pitch_q8);
+	const uint16_t output_pitch_q8_a = quantize_pitch(scaled_pitch_q8_a);
+	const uint16_t output_pitch_q8_b = quantize_pitch(scaled_pitch_q8_b);
+	const float output_voltage_a = pitch_q8_to_voltage(output_pitch_q8_a);
+	const float output_voltage_b = pitch_q8_to_voltage(output_pitch_q8_b);
 
 	if (step_a.gate) {
 		dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
 		dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
-		last_raw_voltage_ = scaled_voltage_a;
+		last_raw_voltage_ = pitch_q8_to_voltage(scaled_pitch_q8_a);
 		last_quantized_voltage_ = output_voltage_a;
 		gate_.set(true);
 		gate_active_ = true;
@@ -585,43 +570,42 @@ void SequencerEngine::reset_transport() {
 
 uint32_t SequencerEngine::compute_next_step_interval_us() const {
 	const uint32_t base = tick_interval_us_;
-	if (swing_amount_ <= 0.0f) {
+	if (swing_pot_value_ == 0u) {
 		return base;
 	}
 
-	const uint32_t swing_delta = static_cast<uint32_t>(static_cast<float>(base) * swing_amount_);
+	// swing_delta = base * (pot / (255 * 4)); max swing is 25% at full pot.
+	const uint32_t swing_delta = static_cast<uint32_t>(
+		(static_cast<uint64_t>(base) * swing_pot_value_ + 510u) / 1020u
+	);
 	if ((tick_counter_ & 1u) == 0u) {
 		return (base > swing_delta) ? (base - swing_delta) : 1u;
 	}
 	return base + swing_delta;
 }
 
-float SequencerEngine::apply_pitch_range(float source_voltage) const {
+uint16_t SequencerEngine::apply_pitch_range(uint16_t source_q8) const {
 	if (range_octaves_ == 0) {
-		return 0.0f;
+		return 0;
 	}
 
-	float normalized = source_voltage / RANDOM_VOLTAGE_MAX;
-	if (normalized < 0.0f) {
-		normalized = 0.0f;
+	uint32_t scaled = (static_cast<uint32_t>(source_q8) * range_octaves_ + (SOURCE_RANGE_OCTAVES / 2u))
+		/ SOURCE_RANGE_OCTAVES;
+	const uint32_t max_q8 = static_cast<uint32_t>(range_octaves_) * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
+	if (scaled > max_q8) {
+		scaled = max_q8;
 	}
-	if (normalized > 1.0f) {
-		normalized = 1.0f;
-	}
-	return normalized * static_cast<float>(range_octaves_);
+	return static_cast<uint16_t>(scaled);
 }
 
-float SequencerEngine::quantize_voltage(float voltage) const {
-	if (quantization_mode_ == QuantizationMode::kUnquantized) {
-		return voltage;
+uint16_t SequencerEngine::quantize_pitch(uint16_t pitch_q8) const {
+	const uint32_t max_q8 = static_cast<uint32_t>(range_octaves_) * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
+	if (pitch_q8 >= max_q8) {
+		return static_cast<uint16_t>(max_q8);
 	}
 
-	const float max_voltage = static_cast<float>(range_octaves_);
-	if (voltage <= 0.0f) {
-		return 0.0f;
-	}
-	if (voltage >= max_voltage) {
-		return max_voltage;
+	if (quantization_mode_ == QuantizationMode::kUnquantized) {
+		return pitch_q8;
 	}
 
 	static constexpr uint8_t CHROMATIC[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
@@ -650,26 +634,28 @@ float SequencerEngine::quantize_voltage(float voltage) const {
 			scale = PENTATONIC;
 			scale_size = sizeof(PENTATONIC);
 			break;
-		case QuantizationMode::kExtra:
-			scale = EXTRA;
-			scale_size = sizeof(EXTRA);
-			break;
-		case QuantizationMode::kUnquantized:
-		default:
-			return voltage;
-	}
+			case QuantizationMode::kExtra:
+				scale = EXTRA;
+				scale_size = sizeof(EXTRA);
+				break;
+			case QuantizationMode::kUnquantized:
+			default:
+				return pitch_q8;
+		}
 
-	const float semitone = voltage * 12.0f;
-	const int32_t rounded = static_cast<int32_t>(lroundf(semitone));
+	const int32_t rounded = static_cast<int32_t>((static_cast<uint32_t>(pitch_q8) + (PITCH_Q8_PER_SEMITONE / 2u))
+		/ PITCH_Q8_PER_SEMITONE);
 	const int32_t octave_center = rounded / 12;
 
-	float best_distance = 1e9f;
+	int32_t best_distance = 0x7FFFFFFF;
 	int32_t best_semitone = rounded;
 
 	for (int32_t octave = octave_center - 1; octave <= octave_center + 1; ++octave) {
 		for (uint8_t i = 0; i < scale_size; ++i) {
 			const int32_t candidate = (octave * 12) + static_cast<int32_t>(scale[i]);
-			const float distance = fabsf(static_cast<float>(candidate) - semitone);
+			const int32_t candidate_q8 = candidate * static_cast<int32_t>(PITCH_Q8_PER_SEMITONE);
+			const int32_t diff = candidate_q8 - static_cast<int32_t>(pitch_q8);
+			const int32_t distance = (diff < 0) ? -diff : diff;
 			if (distance < best_distance) {
 				best_distance = distance;
 				best_semitone = candidate;
@@ -677,14 +663,14 @@ float SequencerEngine::quantize_voltage(float voltage) const {
 		}
 	}
 
-	float quantized = static_cast<float>(best_semitone) / 12.0f;
-	if (quantized < 0.0f) {
-		quantized = 0.0f;
+	int32_t quantized_q8 = best_semitone * static_cast<int32_t>(PITCH_Q8_PER_SEMITONE);
+	if (quantized_q8 < 0) {
+		quantized_q8 = 0;
 	}
-	if (quantized > max_voltage) {
-		quantized = max_voltage;
+	if (quantized_q8 > static_cast<int32_t>(max_q8)) {
+		quantized_q8 = static_cast<int32_t>(max_q8);
 	}
-	return quantized;
+	return static_cast<uint16_t>(quantized_q8);
 }
 
 const char* SequencerEngine::quantization_mode_to_string(QuantizationMode mode) {
@@ -713,9 +699,12 @@ uint32_t SequencerEngine::next_random(uint32_t& state) {
 	return state;
 }
 
-float SequencerEngine::random_unit(uint32_t& state) {
-	const uint32_t value = next_random(state) & 0x00FFFFFFu;
-	return static_cast<float>(value) / 16777215.0f;
+uint8_t SequencerEngine::random_u8(uint32_t& state) {
+	return static_cast<uint8_t>(next_random(state) >> 24);
+}
+
+float SequencerEngine::pitch_q8_to_voltage(uint16_t pitch_q8) {
+	return static_cast<float>(pitch_q8) / static_cast<float>(SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE);
 }
 
 uint16_t SequencerEngine::tempo_bpm() const {
@@ -723,11 +712,11 @@ uint16_t SequencerEngine::tempo_bpm() const {
 }
 
 float SequencerEngine::swing() const {
-	return swing_amount_;
+	return static_cast<float>(swing_pot_value_) / 1020.0f;
 }
 
 float SequencerEngine::randomness() const {
-	return mutation_probability_;
+	return static_cast<float>(mutation_threshold_) / 255.0f;
 }
 
 uint8_t SequencerEngine::sequence_length() const {

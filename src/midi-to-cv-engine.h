@@ -2,7 +2,6 @@
 #define MIDI_TO_CV_ENGINE_H
 
 #include <vector>
-#include <math.h>
 
 #include "brain-common/brain-gpio-setup.h"
 #include "brain-utils/midi-to-cv.h"
