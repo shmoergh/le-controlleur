@@ -142,6 +142,7 @@ void SequencerEngine::on_mode_enter() {
 	root_edit_armed_ = false;
 	shift_active_ = false;
 	last_shift_context_ = shift_active_;
+	scan_pots_snapshot();
 	update_pot_mappings(true);
 }
 
@@ -608,7 +609,7 @@ void SequencerEngine::init_pot_functions() {
 void SequencerEngine::set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function) {
 	const uint8_t active_functions[NUM_POTS] = {pot_0_function, pot_1_function, pot_2_function};
 	pot_multi_function_.set_active_functions(active_functions, NUM_POTS);
-	pot_multi_function_.update(pots_);
+	pot_multi_function_.update_buffered(pots_, false);
 }
 
 void SequencerEngine::update_pot_mappings(bool force_apply) {
