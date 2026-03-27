@@ -1,7 +1,7 @@
-#include "basic-midi2cv.h"
+#include "midi-to-cv-engine.h"
 #include "debug-log.h"
 
-BasicMidi2CV::BasicMidi2CV(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel) :
+MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel) :
 	button_a_(GPIO_BRAIN_BUTTON_1),
 	button_b_(GPIO_BRAIN_BUTTON_2),
 	pots_(),
@@ -59,7 +59,7 @@ BasicMidi2CV::BasicMidi2CV(brain::io::AudioCvOutChannel cv_channel, uint8_t midi
 	init_pot_functions();
 }
 
-void BasicMidi2CV::button_a_on_press() {
+void MidiToCVEngine::button_a_on_press() {
 	if (state_ == State::kDefault && state_ != State::kSetMidiChannel) {
 		state_ = State::kSetMidiChannel;
 	}
@@ -70,7 +70,7 @@ void BasicMidi2CV::button_a_on_press() {
 	}
 }
 
-void BasicMidi2CV::button_a_on_release() {
+void MidiToCVEngine::button_a_on_release() {
 	if (state_ == State::kSetMidiChannel) {
 		set_midi_channel(midi_channel_);
 		reset_pot_function_context();
@@ -81,7 +81,7 @@ void BasicMidi2CV::button_a_on_release() {
 	state_ = State::kDefault;
 }
 
-void BasicMidi2CV::button_b_on_press() {
+void MidiToCVEngine::button_b_on_press() {
 	if (state_ == State::kDefault && state_ != State::kSetCVChannel) {
 		state_ = State::kSetCVChannel;
 	}
@@ -91,7 +91,7 @@ void BasicMidi2CV::button_b_on_press() {
 	}
 }
 
-void BasicMidi2CV::button_b_on_release() {
+void MidiToCVEngine::button_b_on_release() {
 	if (state_ == State::kSetCVChannel) {
 		set_pitch_channel(cv_channel_);
 		MidiToCV::set_mode(mode_);
@@ -103,7 +103,7 @@ void BasicMidi2CV::button_b_on_release() {
 	state_ = State::kDefault;
 }
 
-void BasicMidi2CV::update() {
+void MidiToCVEngine::update() {
 	button_a_.update();
 	button_b_.update();
 
@@ -201,21 +201,21 @@ void BasicMidi2CV::update() {
 	log_runtime_snapshot();
 }
 
-State BasicMidi2CV::get_state() const {
+State MidiToCVEngine::get_state() const {
 	return state_;
 }
 
-uint8_t BasicMidi2CV::get_midi_channel() const {
+uint8_t MidiToCVEngine::get_midi_channel() const {
 	return midi_channel_;
 }
 
-void BasicMidi2CV::reset_panic() {
+void MidiToCVEngine::reset_panic() {
 	panic_timer_start_ = 0;
 	reset_pot_function_context();
 	leds_.off_all();
 }
 
-void BasicMidi2CV::init_pot_functions() {
+void MidiToCVEngine::init_pot_functions() {
 	pot_multi_function_.init();
 
 	brain::ui::PotFunctionConfig midi_channel_cfg;
@@ -249,18 +249,18 @@ void BasicMidi2CV::init_pot_functions() {
 	pot_multi_function_.register_function(mode_cfg);
 }
 
-void BasicMidi2CV::set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function) {
+void MidiToCVEngine::set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function) {
 	const uint8_t functions[NUM_POTS] = {pot_0_function, pot_1_function, pot_2_function};
 	pot_multi_function_.set_active_functions(functions, NUM_POTS);
 	pot_multi_function_.update(pots_);
 }
 
-void BasicMidi2CV::reset_pot_function_context() {
+void MidiToCVEngine::reset_pot_function_context() {
 	set_active_pot_functions(POT_FUNCTION_ID_NONE, POT_FUNCTION_ID_NONE, POT_FUNCTION_ID_NONE);
 	pot_multi_function_.clear_changed_flags();
 }
 
-void BasicMidi2CV::update_midi_channel_setting() {
+void MidiToCVEngine::update_midi_channel_setting() {
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_MIDI_CHANNEL)) return;
 	uint8_t pot_a_value = pot_multi_function_.get_value(POT_FUNCTION_ID_MIDI_CHANNEL);
 
@@ -269,7 +269,7 @@ void BasicMidi2CV::update_midi_channel_setting() {
 	midi_channel_ = binned_value + 1;
 }
 
-void BasicMidi2CV::update_cv_channel_setting() {
+void MidiToCVEngine::update_cv_channel_setting() {
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_CV_CHANNEL)) return;
 	uint8_t pot_b_value = pot_multi_function_.get_value(POT_FUNCTION_ID_CV_CHANNEL);
 
@@ -280,13 +280,13 @@ void BasicMidi2CV::update_cv_channel_setting() {
 	}
 }
 
-void BasicMidi2CV::update_cc_setting() {
+void MidiToCVEngine::update_cc_setting() {
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_MODE)) return;
 	uint8_t pot_c_value = pot_multi_function_.get_value(POT_FUNCTION_ID_MODE);
 	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
 }
 
-void BasicMidi2CV::load_settings() {
+void MidiToCVEngine::load_settings() {
 	uint8_t pot_a_value = pots_.get(POT_MIDI_CHANNEL);
 	uint8_t binned_value = pot_a_value / 16;
 	midi_channel_ = binned_value + 1;
@@ -305,7 +305,7 @@ void BasicMidi2CV::load_settings() {
 	set_mode(mode_);
 }
 
-void BasicMidi2CV::log_runtime_snapshot() {
+void MidiToCVEngine::log_runtime_snapshot() {
 	absolute_time_t now = get_absolute_time();
 
 	if (telemetry_last_log_time_ != 0) {
@@ -328,7 +328,7 @@ void BasicMidi2CV::log_runtime_snapshot() {
 	);
 }
 
-const char* BasicMidi2CV::state_to_string(State state) const {
+const char* MidiToCVEngine::state_to_string(State state) const {
 	switch (state) {
 		case State::kDefault:
 			return "default";
@@ -343,7 +343,7 @@ const char* BasicMidi2CV::state_to_string(State state) const {
 	}
 }
 
-const char* BasicMidi2CV::cv_channel_to_string(brain::io::AudioCvOutChannel cv_channel) const {
+const char* MidiToCVEngine::cv_channel_to_string(brain::io::AudioCvOutChannel cv_channel) const {
 	switch (cv_channel) {
 		case brain::io::AudioCvOutChannel::kChannelA:
 			return "A";
@@ -354,7 +354,7 @@ const char* BasicMidi2CV::cv_channel_to_string(brain::io::AudioCvOutChannel cv_c
 	}
 }
 
-const char* BasicMidi2CV::mode_to_string(MidiToCV::Mode mode) const {
+const char* MidiToCVEngine::mode_to_string(MidiToCV::Mode mode) const {
 	switch (mode) {
 		case MidiToCV::Mode::kDefault:
 			return "velocity";

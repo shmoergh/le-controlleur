@@ -1,5 +1,5 @@
-#ifndef BASIC_MIDI_TO_CV_H
-#define BASIC_MIDI_TO_CV_H
+#ifndef MIDI_TO_CV_ENGINE_H
+#define MIDI_TO_CV_ENGINE_H
 
 #include <vector>
 #include <math.h>
@@ -45,10 +45,10 @@ enum State {
 	kPanicStarted = 3
 };
 
-class BasicMidi2CV : public MidiToCV
+class MidiToCVEngine : public MidiToCV
 {
 public:
-	BasicMidi2CV(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
+	MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
 	State get_state() const;
 	uint8_t get_midi_channel() const;
