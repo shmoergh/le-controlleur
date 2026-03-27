@@ -79,7 +79,7 @@ PersistedSettingsV3 default_settings() {
 	settings.magic = SETTINGS_MAGIC;
 	settings.version = SETTINGS_VERSION_V3;
 	settings.midi_channel = 1;
-	settings.app_mode = APP_MODE_MIDI_TO_CV;
+	settings.app_mode = APP_MODE_SEQUENCER;
 	settings.root_note = 0;
 	settings.checksum = checksum32(settings);
 	return settings;

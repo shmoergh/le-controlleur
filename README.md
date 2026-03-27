@@ -3,8 +3,8 @@
 `Le Controlleur` is a dual-mode performance firmware for the Shmøergh Moduleur Brain module.
 
 It combines:
-- a hands-on `MIDI to CV` interface for keyboard/controller-driven patches
 - a clockable `Sequencer` engine for autonomous and generative modular playback
+- a hands-on `MIDI to CV` interface for keyboard/controller-driven patches
 
 The goal is fast, playable control with minimal hardware controls: two buttons, three pots, two CV outs, one gate out, and clear LED/console feedback.
 
@@ -14,12 +14,12 @@ Flash `le-controlleur-pico.uf2` (or `le-controlleur-pico-2.uf2` for Pico 2) to y
 
 ## User Guide
 
-- [MIDI to CV Mode](./MIDI2CV.md)
 - [Sequencer Mode](./SEQUENCER.md)
+- [MIDI to CV Mode](./MIDI2CV.md)
 
 ### Switching Main Modes
 
-To switch between `MIDI to CV` and `Sequencer`, press and hold `Button A + Button B` together for about `1.5 seconds`.
+To switch between `Sequencer` and `MIDI to CV`, press and hold `Button A + Button B` together for about `1.5 seconds`.
 
 ## Build
 
