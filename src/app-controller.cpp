@@ -41,7 +41,7 @@ void AppController::update() {
 			break;
 		}
 		case AppMode::kSequencer:
-			// Sequencer routing will be implemented in the next phase.
+			sequencer_engine_.update();
 			break;
 	}
 }
@@ -153,7 +153,28 @@ void AppController::check_dispatch_pending_single_button_presses(absolute_time_t
 }
 
 void AppController::check_dispatch_single_button_release(bool is_button_a) {
-	if (mode_ != AppMode::kMidiToCv || dual_button_active_) {
+	if (dual_button_active_) {
+		return;
+	}
+
+	if (mode_ == AppMode::kSequencer) {
+		if (!is_button_a) {
+			button_b_pending_single_press_ = false;
+			button_b_single_press_dispatched_ = false;
+			return;
+		}
+
+		const absolute_time_t now = get_absolute_time();
+		const int64_t held_us = (first_button_pressed_at_ == 0) ? 0 : absolute_time_diff_us(first_button_pressed_at_, now);
+		if (held_us <= BUTTON_SHORT_PRESS_MAX_US) {
+			sequencer_engine_.on_button_a_short_press();
+		}
+		button_a_pending_single_press_ = false;
+		button_a_single_press_dispatched_ = false;
+		return;
+	}
+
+	if (mode_ != AppMode::kMidiToCv) {
 		return;
 	}
 
@@ -247,9 +268,18 @@ void AppController::set_mode(AppMode mode) {
 		return;
 	}
 
+	if (mode_ == AppMode::kSequencer) {
+		sequencer_engine_.on_mode_exit();
+	}
+
 	cancel_pending_single_button_presses();
 	LOG_INFO("APP", "mode-exit=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 	mode_ = mode;
+
+	if (mode_ == AppMode::kSequencer) {
+		sequencer_engine_.on_mode_enter();
+	}
+
 	midi_to_cv_engine_.play_startup_animation();
 	LOG_INFO("APP", "mode-enter=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 }

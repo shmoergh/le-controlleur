@@ -6,6 +6,7 @@
 #include "brain-common/brain-gpio-setup.h"
 #include "brain-ui/button.h"
 #include "midi-to-cv-engine.h"
+#include "sequencer-engine.h"
 
 constexpr int64_t BUTTON_SHORT_PRESS_MAX_US = 400LL * 1000LL;
 constexpr int64_t BUTTON_LONG_PRESS_MIN_US = 1500LL * 1000LL;
@@ -27,6 +28,7 @@ private:
 	brain::ui::Button button_b_;
 	AppMode mode_;
 	MidiToCVEngine midi_to_cv_engine_;
+	SequencerEngine sequencer_engine_;
 	bool button_a_pressed_;
 	bool button_b_pressed_;
 	bool button_a_pending_single_press_;
