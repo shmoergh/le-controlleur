@@ -66,7 +66,7 @@ private:
 	static constexpr uint8_t NUM_POTS = 3;
 	static constexpr uint16_t BPM_MIN = 60;
 	static constexpr uint16_t BPM_MAX = 240;
-	static constexpr float SWING_MAX = 0.40f;
+	static constexpr float SWING_MAX = 0.25f;
 	static constexpr uint8_t RANGE_OCTAVES_MIN = 0;
 	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
 	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
