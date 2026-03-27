@@ -32,11 +32,11 @@ void AppController::update() {
 	button_a_.update();
 	button_b_.update();
 
-	maybe_toggle_mode();
+	check_toggle_mode();
 
 	switch (mode_) {
 		case AppMode::kMidiToCv: {
-			maybe_dispatch_pending_single_button_presses(get_absolute_time());
+			check_dispatch_pending_single_button_presses(get_absolute_time());
 			midi_to_cv_engine_.update();
 			break;
 		}
@@ -76,10 +76,10 @@ void AppController::on_button_a_press() {
 
 void AppController::on_button_a_release() {
 	button_a_pressed_ = false;
-	maybe_dispatch_single_button_release(true);
+	check_dispatch_single_button_release(true);
 
 	if (!button_a_pressed_ && !button_b_pressed_) {
-		maybe_handle_short_dual_button_on_release(get_absolute_time());
+		check_handle_short_dual_button_on_release(get_absolute_time());
 		clear_dual_button_tracking();
 	}
 }
@@ -110,10 +110,10 @@ void AppController::on_button_b_press() {
 
 void AppController::on_button_b_release() {
 	button_b_pressed_ = false;
-	maybe_dispatch_single_button_release(false);
+	check_dispatch_single_button_release(false);
 
 	if (!button_a_pressed_ && !button_b_pressed_) {
-		maybe_handle_short_dual_button_on_release(get_absolute_time());
+		check_handle_short_dual_button_on_release(get_absolute_time());
 		clear_dual_button_tracking();
 	}
 }
@@ -130,7 +130,7 @@ void AppController::start_dual_button_press(absolute_time_t started_at) {
 	LOG_TRACE("CTRL", "dual-button-started");
 }
 
-void AppController::maybe_dispatch_pending_single_button_presses(absolute_time_t now) {
+void AppController::check_dispatch_pending_single_button_presses(absolute_time_t now) {
 	if (dual_button_active_ || first_button_pressed_at_ == 0) {
 		return;
 	}
@@ -152,7 +152,7 @@ void AppController::maybe_dispatch_pending_single_button_presses(absolute_time_t
 	}
 }
 
-void AppController::maybe_dispatch_single_button_release(bool is_button_a) {
+void AppController::check_dispatch_single_button_release(bool is_button_a) {
 	if (mode_ != AppMode::kMidiToCv || dual_button_active_) {
 		return;
 	}
@@ -198,7 +198,7 @@ void AppController::clear_dual_button_tracking() {
 	cancel_pending_single_button_presses();
 }
 
-void AppController::maybe_toggle_mode() {
+void AppController::check_toggle_mode() {
 	if (!dual_button_active_ || dual_button_action_handled_ || dual_button_started_at_ == 0) {
 		return;
 	}
@@ -221,7 +221,7 @@ void AppController::maybe_toggle_mode() {
 	dual_button_action_handled_ = true;
 }
 
-void AppController::maybe_handle_short_dual_button_on_release(absolute_time_t released_at) {
+void AppController::check_handle_short_dual_button_on_release(absolute_time_t released_at) {
 	if (!dual_button_active_ || dual_button_action_handled_ || dual_button_started_at_ == 0) {
 		return;
 	}
