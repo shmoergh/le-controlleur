@@ -26,6 +26,9 @@ SequencerEngine::SequencerEngine() :
 	external_sync_enabled_(false),
 	last_pulse_in_high_(false),
 	last_external_tick_us_(0),
+	external_interval_us_(125000),
+	external_swing_tick_pending_(false),
+	external_swing_tick_due_us_(0),
 	last_raw_voltage_(0.0f),
 	last_quantized_voltage_(0.0f),
 	pot_led_overlay_active_(false),
@@ -63,12 +66,41 @@ void SequencerEngine::update() {
 	}
 
 	if (external_sync_enabled_) {
+		if (external_swing_tick_pending_ && now_us >= external_swing_tick_due_us_) {
+			external_swing_tick_pending_ = false;
+			tick(now_us);
+		}
+
 		if (pulse_in_high && !last_pulse_in_high_) {
+			if (external_swing_tick_pending_) {
+				// Avoid dropping a delayed swung step when external pulses arrive faster than expected.
+				external_swing_tick_pending_ = false;
+				tick(now_us);
+			}
+
 			if (last_external_tick_us_ != 0 && now_us > last_external_tick_us_) {
-				current_step_interval_us_ = static_cast<uint32_t>(now_us - last_external_tick_us_);
+				const uint32_t pulse_interval_us = static_cast<uint32_t>(now_us - last_external_tick_us_);
+				if (pulse_interval_us >= 1000u && pulse_interval_us <= 2000000u) {
+					const int32_t error =
+						static_cast<int32_t>(pulse_interval_us) - static_cast<int32_t>(external_interval_us_);
+					external_interval_us_ = static_cast<uint32_t>(
+						static_cast<int32_t>(external_interval_us_) + (error >> EXTERNAL_CLOCK_EMA_SHIFT)
+					);
+				}
 			}
 			last_external_tick_us_ = now_us;
-			tick(now_us);
+			tick_interval_us_ = external_interval_us_;
+
+			const uint32_t swing_delta = compute_swing_delta_us(external_interval_us_);
+			const bool delay_this_step = (swing_delta > 0u) && ((tick_counter_ & 1u) == 1u);
+			if (delay_this_step) {
+				external_swing_tick_pending_ = true;
+				external_swing_tick_due_us_ = now_us + swing_delta;
+				current_step_interval_us_ = external_interval_us_ + swing_delta;
+			} else {
+				current_step_interval_us_ = external_interval_us_;
+				tick(now_us);
+			}
 		}
 		last_pulse_in_high_ = pulse_in_high;
 		return;
@@ -119,9 +151,13 @@ void SequencerEngine::on_button_a_short_press() {
 	if (playing_) {
 		next_tick_due_us_ = 0;
 		tick_counter_ = 0;
+		external_swing_tick_pending_ = false;
+		external_swing_tick_due_us_ = 0;
 	} else {
 		gate_.set(false);
 		gate_active_ = false;
+		external_swing_tick_pending_ = false;
+		external_swing_tick_due_us_ = 0;
 		button_led_.off();
 	}
 }
@@ -315,6 +351,9 @@ void SequencerEngine::update_bpm_from_pot(bool force_apply) {
 			// Entering external sync: stop internal scheduler state once.
 			next_tick_due_us_ = 0;
 			last_external_tick_us_ = 0;
+			external_interval_us_ = tick_interval_us_;
+			external_swing_tick_pending_ = false;
+			external_swing_tick_due_us_ = 0;
 		}
 		return;
 	}
@@ -328,6 +367,8 @@ void SequencerEngine::update_bpm_from_pot(bool force_apply) {
 	if (was_external_sync_enabled) {
 		// Leaving external sync: restart internal scheduler from "now".
 		next_tick_due_us_ = 0;
+		external_swing_tick_pending_ = false;
+		external_swing_tick_due_us_ = 0;
 	}
 }
 
@@ -675,22 +716,33 @@ void SequencerEngine::reset_transport() {
 	last_pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH] = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
 	last_pulse_in_high_ = gate_.read();
 	last_external_tick_us_ = 0;
+	external_interval_us_ = tick_interval_us_;
+	external_swing_tick_pending_ = false;
+	external_swing_tick_due_us_ = 0;
 	reset_gate_history();
 	button_led_.off();
 }
 
-uint32_t SequencerEngine::compute_next_step_interval_us() const {
-	const uint32_t base = tick_interval_us_;
-	if (swing_pot_value_ == 0u) {
-		return base;
+uint32_t SequencerEngine::compute_swing_delta_us(uint32_t base_interval_us) const {
+	if (swing_pot_value_ == 0u || base_interval_us == 0u) {
+		return 0u;
 	}
 
 	// swing_delta = base * ((pot/255) * SWING_MAX), with SWING_MAX = 30%.
 	const uint32_t swing_divisor = 255u * SWING_MAX_DENOMINATOR;
 	const uint32_t swing_round = swing_divisor / 2u;
-	const uint32_t swing_delta = static_cast<uint32_t>(
-		(static_cast<uint64_t>(base) * swing_pot_value_ * SWING_MAX_NUMERATOR + swing_round) / swing_divisor
+	return static_cast<uint32_t>(
+		(static_cast<uint64_t>(base_interval_us) * swing_pot_value_ * SWING_MAX_NUMERATOR + swing_round) / swing_divisor
 	);
+}
+
+uint32_t SequencerEngine::compute_next_step_interval_us() const {
+	const uint32_t base = tick_interval_us_;
+	const uint32_t swing_delta = compute_swing_delta_us(base);
+	if (swing_delta == 0u) {
+		return base;
+	}
+
 	if ((tick_counter_ & 1u) == 0u) {
 		return (base > swing_delta) ? (base - swing_delta) : 1u;
 	}

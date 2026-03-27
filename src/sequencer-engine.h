@@ -78,8 +78,9 @@ private:
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
 	static constexpr uint32_t BUTTON_LED_BLINK_INTERVAL_MS = 40;
-	static constexpr uint8_t SWING_MAX_NUMERATOR = 3;   // 30%
-	static constexpr uint8_t SWING_MAX_DENOMINATOR = 10;
+	static constexpr uint8_t SWING_MAX_NUMERATOR = 1;   // 50%
+	static constexpr uint8_t SWING_MAX_DENOMINATOR = 2;
+	static constexpr uint8_t EXTERNAL_CLOCK_EMA_SHIFT = 3;  // 1/8 new sample
 	static constexpr uint8_t POT_LED_SOFT_BRIGHTNESS = 48;
 	static constexpr uint16_t PITCH_Q8_PER_SEMITONE = 256;
 	static constexpr uint16_t SEMITONES_PER_OCTAVE = 12;
@@ -115,7 +116,10 @@ private:
 	uint8_t mutation_threshold_;
 	bool external_sync_enabled_;
 	bool last_pulse_in_high_;
-	uint64_t last_external_tick_us_;
+	uint64_t last_external_tick_us_;  // Last external pulse edge timestamp
+	uint32_t external_interval_us_;
+	bool external_swing_tick_pending_;
+	uint64_t external_swing_tick_due_us_;
 	float last_raw_voltage_;
 	float last_quantized_voltage_;
 	bool pot_led_overlay_active_;
@@ -150,6 +154,7 @@ private:
 	uint8_t gate_history_mask() const;
 	void tick(uint64_t now_us);
 	void reset_transport();
+	uint32_t compute_swing_delta_us(uint32_t base_interval_us) const;
 	uint16_t apply_pitch_range(uint16_t source_q8) const;
 	uint16_t quantize_pitch(uint16_t pitch_q8) const;
 	uint32_t compute_next_step_interval_us() const;
