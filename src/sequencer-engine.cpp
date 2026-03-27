@@ -13,18 +13,17 @@ SequencerEngine::SequencerEngine() :
 	gate_active_(false),
 	bpm_(120),
 	tick_interval_us_(125000),
-	last_tick_time_us_(0),
+	next_tick_due_us_(0),
 	gate_off_time_us_(0),
 	tick_counter_(0),
+	current_step_interval_us_(125000),
 	shift_active_(false),
+	last_shift_context_(false),
+	swing_amount_(0.0f),
 	range_octaves_(3),
-	previous_range_octaves_(255),
 	quantization_mode_(QuantizationMode::kChromatic),
-	previous_quantization_mode_index_(255),
 	randomness_pot_value_(0),
 	mutation_probability_(0.0f),
-	previous_randomness_pot_value_(255),
-	previous_length_(0),
 	last_raw_voltage_(0.0f),
 	last_quantized_voltage_(0.0f),
 	rng_state_a_(0x12345678u),
@@ -39,9 +38,7 @@ void SequencerEngine::update() {
 	}
 
 	button_led_.update();
-	update_bpm_from_pot();
-	update_range_or_quantization_from_pot2();
-	update_randomness_or_length_from_pot3();
+	update_pot_mappings();
 
 	const uint64_t now_us = time_us_64();
 
@@ -54,8 +51,16 @@ void SequencerEngine::update() {
 		return;
 	}
 
-	if (last_tick_time_us_ == 0 || (now_us - last_tick_time_us_) >= tick_interval_us_) {
-		tick(now_us);
+	if (next_tick_due_us_ == 0) {
+		next_tick_due_us_ = now_us;
+	}
+
+	uint8_t safety_counter = 0;
+	while (now_us >= next_tick_due_us_ && safety_counter < 8) {
+		tick(next_tick_due_us_);
+		current_step_interval_us_ = compute_next_step_interval_us();
+		next_tick_due_us_ += current_step_interval_us_;
+		++safety_counter;
 	}
 }
 
@@ -66,9 +71,8 @@ void SequencerEngine::on_mode_enter() {
 
 	reset_transport();
 	shift_active_ = false;
-	update_bpm_from_pot(true);
-	update_range_or_quantization_from_pot2(true);
-	update_randomness_or_length_from_pot3(true);
+	last_shift_context_ = shift_active_;
+	update_pot_mappings(true);
 }
 
 void SequencerEngine::on_mode_exit() {
@@ -78,6 +82,7 @@ void SequencerEngine::on_mode_exit() {
 
 	reset_transport();
 	shift_active_ = false;
+	last_shift_context_ = shift_active_;
 }
 
 void SequencerEngine::on_button_a_short_press() {
@@ -88,7 +93,7 @@ void SequencerEngine::on_button_a_short_press() {
 	playing_ = !playing_;
 
 	if (playing_) {
-		last_tick_time_us_ = 0;
+		next_tick_due_us_ = 0;
 		tick_counter_ = 0;
 	} else {
 		gate_.set(false);
@@ -103,8 +108,7 @@ void SequencerEngine::on_button_b_press() {
 	}
 
 	shift_active_ = true;
-	update_range_or_quantization_from_pot2(true);
-	update_randomness_or_length_from_pot3(true);
+	update_pot_mappings(true);
 }
 
 void SequencerEngine::on_button_b_release() {
@@ -113,8 +117,7 @@ void SequencerEngine::on_button_b_release() {
 	}
 
 	shift_active_ = false;
-	update_range_or_quantization_from_pot2(true);
-	update_randomness_or_length_from_pot3(true);
+	update_pot_mappings(true);
 }
 
 void SequencerEngine::init_sequence() {
@@ -169,35 +172,139 @@ void SequencerEngine::init_io() {
 	button_led_.init();
 	button_led_.off();
 
+	init_pot_functions();
 	initialized_ = true;
-	update_bpm_from_pot(true);
-	update_range_or_quantization_from_pot2(true);
+	update_pot_mappings(true);
 }
 
-void SequencerEngine::update_bpm_from_pot(bool force_log) {
-	const uint8_t pot_value = pots_.get(POT_INDEX_BPM);
+void SequencerEngine::init_pot_functions() {
+	pot_multi_function_.init();
+
+	brain::ui::PotFunctionConfig bpm_cfg;
+	bpm_cfg.function_id = POT_FUNCTION_ID_BPM;
+	bpm_cfg.pot_index = POT_INDEX_BPM;
+	bpm_cfg.min_value = 0;
+	bpm_cfg.max_value = 255;
+	bpm_cfg.initial_value = static_cast<uint8_t>((static_cast<uint32_t>(bpm_ - BPM_MIN) * 255u) / (BPM_MAX - BPM_MIN));
+	bpm_cfg.mode = brain::ui::PotMode::kValueScale;
+	bpm_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
+	pot_multi_function_.register_function(bpm_cfg);
+
+	brain::ui::PotFunctionConfig swing_cfg;
+	swing_cfg.function_id = POT_FUNCTION_ID_SWING;
+	swing_cfg.pot_index = POT_INDEX_BPM;
+	swing_cfg.min_value = 0;
+	swing_cfg.max_value = 255;
+	swing_cfg.initial_value = 0;
+	swing_cfg.mode = brain::ui::PotMode::kValueScale;
+	swing_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
+	pot_multi_function_.register_function(swing_cfg);
+
+	brain::ui::PotFunctionConfig range_cfg;
+	range_cfg.function_id = POT_FUNCTION_ID_RANGE;
+	range_cfg.pot_index = POT_INDEX_RANGE_OR_QUANTIZATION;
+	range_cfg.min_value = 0;
+	range_cfg.max_value = 255;
+	range_cfg.initial_value = static_cast<uint8_t>((static_cast<uint32_t>(range_octaves_) * 255u) / RANGE_OCTAVES_MAX);
+	range_cfg.mode = brain::ui::PotMode::kValueScale;
+	range_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
+	pot_multi_function_.register_function(range_cfg);
+
+	brain::ui::PotFunctionConfig quant_cfg;
+	quant_cfg.function_id = POT_FUNCTION_ID_QUANTIZATION;
+	quant_cfg.pot_index = POT_INDEX_RANGE_OR_QUANTIZATION;
+	quant_cfg.min_value = 0;
+	quant_cfg.max_value = 255;
+	quant_cfg.initial_value = static_cast<uint8_t>((static_cast<uint32_t>(static_cast<uint8_t>(quantization_mode_)) * 255u) / (QUANTIZATION_MODE_COUNT - 1));
+	quant_cfg.mode = brain::ui::PotMode::kValueScale;
+	quant_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
+	pot_multi_function_.register_function(quant_cfg);
+
+	brain::ui::PotFunctionConfig randomness_cfg;
+	randomness_cfg.function_id = POT_FUNCTION_ID_RANDOMNESS;
+	randomness_cfg.pot_index = POT_INDEX_RANDOMNESS_OR_LENGTH;
+	randomness_cfg.min_value = 0;
+	randomness_cfg.max_value = 255;
+	randomness_cfg.initial_value = randomness_pot_value_;
+	randomness_cfg.mode = brain::ui::PotMode::kValueScale;
+	randomness_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
+	pot_multi_function_.register_function(randomness_cfg);
+
+	brain::ui::PotFunctionConfig length_cfg;
+	length_cfg.function_id = POT_FUNCTION_ID_LENGTH;
+	length_cfg.pot_index = POT_INDEX_RANDOMNESS_OR_LENGTH;
+	length_cfg.min_value = 0;
+	length_cfg.max_value = 255;
+	length_cfg.initial_value = static_cast<uint8_t>(((static_cast<uint32_t>(sequence_a_.length - 1u)) * 255u) / 63u);
+	length_cfg.mode = brain::ui::PotMode::kValueScale;
+	length_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
+	pot_multi_function_.register_function(length_cfg);
+}
+
+void SequencerEngine::set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function) {
+	const uint8_t active_functions[NUM_POTS] = {pot_0_function, pot_1_function, pot_2_function};
+	pot_multi_function_.set_active_functions(active_functions, NUM_POTS);
+	pot_multi_function_.update(pots_);
+}
+
+void SequencerEngine::update_pot_mappings(bool force_apply) {
+	const bool shift_context_changed = (shift_active_ != last_shift_context_);
+	if (shift_active_) {
+		set_active_pot_functions(POT_FUNCTION_ID_SWING, POT_FUNCTION_ID_QUANTIZATION, POT_FUNCTION_ID_LENGTH);
+	} else {
+		set_active_pot_functions(POT_FUNCTION_ID_BPM, POT_FUNCTION_ID_RANGE, POT_FUNCTION_ID_RANDOMNESS);
+	}
+
+	if (shift_context_changed) {
+		pot_multi_function_.clear_changed_flags();
+		last_shift_context_ = shift_active_;
+		if (!force_apply) {
+			return;
+		}
+	}
+
+	update_bpm_from_pot(force_apply);
+	update_swing_from_pot1(force_apply);
+	update_range_or_quantization_from_pot2(force_apply);
+	update_randomness_or_length_from_pot3(force_apply);
+	pot_multi_function_.clear_changed_flags();
+}
+
+void SequencerEngine::update_bpm_from_pot(bool force_apply) {
+	if (!force_apply && !pot_multi_function_.get_changed(POT_FUNCTION_ID_BPM)) {
+		return;
+	}
+	const uint8_t pot_value = pot_multi_function_.get_value(POT_FUNCTION_ID_BPM);
 	const uint16_t span = static_cast<uint16_t>(BPM_MAX - BPM_MIN);
 	const uint16_t mapped_bpm = static_cast<uint16_t>(BPM_MIN + ((static_cast<uint32_t>(pot_value) * span) / 255));
 
-	if (!force_log && mapped_bpm == bpm_) {
-		return;
-	}
-
 	bpm_ = mapped_bpm;
 	tick_interval_us_ = 60000000u / (bpm_ * STEPS_PER_QUARTER_NOTE);
+	current_step_interval_us_ = compute_next_step_interval_us();
 }
 
-void SequencerEngine::update_range_or_quantization_from_pot2(bool force_log) {
-	const uint8_t pot_value = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+void SequencerEngine::update_swing_from_pot1(bool force_apply) {
+	if (!shift_active_) {
+		return;
+	}
+	if (!force_apply && !pot_multi_function_.get_changed(POT_FUNCTION_ID_SWING)) {
+		return;
+	}
+	const uint8_t pot_value = pot_multi_function_.get_value(POT_FUNCTION_ID_SWING);
+	swing_amount_ = (static_cast<float>(pot_value) / 255.0f) * SWING_MAX;
+	current_step_interval_us_ = compute_next_step_interval_us();
+}
+
+void SequencerEngine::update_range_or_quantization_from_pot2(bool force_apply) {
+	const uint8_t function_id = shift_active_ ? POT_FUNCTION_ID_QUANTIZATION : POT_FUNCTION_ID_RANGE;
+	if (!force_apply && !pot_multi_function_.get_changed(function_id)) {
+		return;
+	}
+	const uint8_t pot_value = pot_multi_function_.get_value(function_id);
 
 	if (shift_active_) {
 		const uint8_t mode_index = static_cast<uint8_t>((static_cast<uint32_t>(pot_value) * QUANTIZATION_MODE_COUNT) / 256u);
-		if (!force_log && mode_index == previous_quantization_mode_index_) {
-			return;
-		}
-
 		quantization_mode_ = static_cast<QuantizationMode>(mode_index);
-		previous_quantization_mode_index_ = mode_index;
 		return;
 	}
 
@@ -205,40 +312,27 @@ void SequencerEngine::update_range_or_quantization_from_pot2(bool force_log) {
 	const uint8_t mapped_range = static_cast<uint8_t>(
 		RANGE_OCTAVES_MIN + ((static_cast<uint32_t>(pot_value) * span) / 256u)
 	);
-
-	if (!force_log && mapped_range == previous_range_octaves_) {
-		return;
-	}
-
 	range_octaves_ = mapped_range;
-	previous_range_octaves_ = mapped_range;
 }
 
-void SequencerEngine::update_randomness_or_length_from_pot3(bool force_log) {
-	const uint8_t pot_value = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
+void SequencerEngine::update_randomness_or_length_from_pot3(bool force_apply) {
+	const uint8_t function_id = shift_active_ ? POT_FUNCTION_ID_LENGTH : POT_FUNCTION_ID_RANDOMNESS;
+	if (!force_apply && !pot_multi_function_.get_changed(function_id)) {
+		return;
+	}
+	const uint8_t pot_value = pot_multi_function_.get_value(function_id);
 
 	if (shift_active_) {
 		const uint8_t new_length = static_cast<uint8_t>(1 + ((static_cast<uint32_t>(pot_value) * 63u) / 255u));
-		if (!force_log && new_length == sequence_a_.length) {
-			return;
-		}
-
 		sequence_a_.length = new_length;
 		if (sequence_a_.position >= sequence_a_.length) {
 			sequence_a_.position = 0;
 		}
-
-		previous_length_ = new_length;
-		return;
-	}
-
-	if (!force_log && pot_value == previous_randomness_pot_value_) {
 		return;
 	}
 
 	randomness_pot_value_ = pot_value;
 	mutation_probability_ = static_cast<float>(randomness_pot_value_) / 255.0f;
-	previous_randomness_pot_value_ = pot_value;
 }
 
 void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
@@ -277,8 +371,6 @@ void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
 }
 
 void SequencerEngine::tick(uint64_t now_us) {
-	last_tick_time_us_ = now_us;
-
 	const uint8_t step_index = sequence_a_.position;
 	apply_mutation_for_step(step_index);
 	const Step& step_a = sequence_a_.steps[step_index];
@@ -288,13 +380,11 @@ void SequencerEngine::tick(uint64_t now_us) {
 	const float output_voltage_a = quantize_voltage(scaled_voltage_a);
 	const float output_voltage_b = quantize_voltage(scaled_voltage_b);
 
-	last_raw_voltage_ = scaled_voltage_a;
-	last_quantized_voltage_ = output_voltage_a;
-
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
-
 	if (step_a.gate) {
+		dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
+		dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
+		last_raw_voltage_ = scaled_voltage_a;
+		last_quantized_voltage_ = output_voltage_a;
 		gate_.set(true);
 		gate_active_ = true;
 		gate_off_time_us_ = now_us + GATE_PULSE_US;
@@ -314,12 +404,26 @@ void SequencerEngine::tick(uint64_t now_us) {
 void SequencerEngine::reset_transport() {
 	playing_ = false;
 	sequence_a_.position = 0;
-	last_tick_time_us_ = 0;
+	next_tick_due_us_ = 0;
 	gate_off_time_us_ = 0;
 	gate_active_ = false;
 	tick_counter_ = 0;
+	current_step_interval_us_ = tick_interval_us_;
 	gate_.set(false);
 	button_led_.off();
+}
+
+uint32_t SequencerEngine::compute_next_step_interval_us() const {
+	const uint32_t base = tick_interval_us_;
+	if (swing_amount_ <= 0.0f) {
+		return base;
+	}
+
+	const uint32_t swing_delta = static_cast<uint32_t>(static_cast<float>(base) * swing_amount_);
+	if ((tick_counter_ & 1u) == 0u) {
+		return (base > swing_delta) ? (base - swing_delta) : 1u;
+	}
+	return base + swing_delta;
 }
 
 float SequencerEngine::apply_pitch_range(float source_voltage) const {
@@ -448,6 +552,10 @@ uint16_t SequencerEngine::tempo_bpm() const {
 	return bpm_;
 }
 
+float SequencerEngine::swing() const {
+	return swing_amount_;
+}
+
 float SequencerEngine::randomness() const {
 	return mutation_probability_;
 }
@@ -470,4 +578,12 @@ float SequencerEngine::last_raw_voltage() const {
 
 float SequencerEngine::last_quantized_voltage() const {
 	return last_quantized_voltage_;
+}
+
+uint32_t SequencerEngine::base_interval_us() const {
+	return tick_interval_us_;
+}
+
+uint32_t SequencerEngine::current_interval_us() const {
+	return current_step_interval_us_;
 }

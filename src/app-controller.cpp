@@ -19,6 +19,7 @@ AppController::AppController() :
 	first_button_pressed_at_(0),
 	dual_button_started_at_(0),
 	status_has_text_(false),
+	status_line_count_(0),
 	status_text_{0} {
 	button_a_.init();
 	button_b_.init();
@@ -271,27 +272,43 @@ void AppController::check_handle_short_dual_button_on_release(absolute_time_t re
 }
 
 void AppController::render_status_block() {
-	char current_status[160];
+	char current_status[512];
+	uint8_t line_count = 0;
+
 	if (mode_ == AppMode::kMidiToCv) {
 		snprintf(
 			current_status,
 			sizeof(current_status),
-			"MODE: MIDI 2 CV | Midi Channel: %u",
+			"MODE: MIDI 2 CV\n"
+			"Midi Channel: %u",
 			static_cast<unsigned>(midi_to_cv_engine_.get_midi_channel())
 		);
+		line_count = 2;
 	} else {
 		snprintf(
 			current_status,
 			sizeof(current_status),
-			"MODE: SEQUENCER | T:%u R:%.2f L:%u O:%u Q:%s V:%.2f>%.2f",
+			"MODE: SEQUENCER\n"
+			"Tempo: %u\n"
+			"Swing: %.1f%%\n"
+			"Randomness: %.2f\n"
+			"Sequence Length: %u\n"
+			"Octave Range: %u\n"
+			"Quantization: %s\n"
+			"Voltage: %.2f > %.2f\n"
+			"Timing: base=%luus current=%luus",
 			static_cast<unsigned>(sequencer_engine_.tempo_bpm()),
+			sequencer_engine_.swing() * 100.0f,
 			sequencer_engine_.randomness(),
 			static_cast<unsigned>(sequencer_engine_.sequence_length()),
 			static_cast<unsigned>(sequencer_engine_.range_octaves()),
 			sequencer_engine_.quantization_mode_name(),
 			sequencer_engine_.last_raw_voltage(),
-			sequencer_engine_.last_quantized_voltage()
+			sequencer_engine_.last_quantized_voltage(),
+			static_cast<unsigned long>(sequencer_engine_.base_interval_us()),
+			static_cast<unsigned long>(sequencer_engine_.current_interval_us())
 		);
+		line_count = 9;
 	}
 
 	if (status_has_text_ && strcmp(current_status, status_text_) == 0) {
@@ -300,9 +317,17 @@ void AppController::render_status_block() {
 
 	snprintf(status_text_, sizeof(status_text_), "%s", current_status);
 	status_has_text_ = true;
+	if (status_line_count_ == 0) {
+		status_line_count_ = line_count;
+	}
 
-	printf("\r\033[2K%s", status_text_);
+	printf("\r");
+	if (status_line_count_ > 1) {
+		printf("\033[%uA", static_cast<unsigned>(status_line_count_ - 1));
+	}
+	printf("\033[J%s", status_text_);
 	fflush(stdout);
+	status_line_count_ = line_count;
 }
 
 void AppController::set_mode(AppMode mode) {

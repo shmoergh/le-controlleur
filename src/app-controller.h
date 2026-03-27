@@ -40,7 +40,8 @@ private:
 	absolute_time_t first_button_pressed_at_;
 	absolute_time_t dual_button_started_at_;
 	bool status_has_text_;
-	char status_text_[160];
+	uint8_t status_line_count_;
+	char status_text_[512];
 
 	void on_button_a_press();
 	void on_button_a_release();

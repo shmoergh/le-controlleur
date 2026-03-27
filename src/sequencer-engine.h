@@ -7,6 +7,7 @@
 #include "brain-io/audio-cv-out.h"
 #include "brain-io/pulse.h"
 #include "brain-ui/button-led.h"
+#include "brain-ui/pot-multi-function.h"
 #include "brain-ui/pots.h"
 
 struct Step {
@@ -40,19 +41,32 @@ public:
 	void on_button_b_press();
 	void on_button_b_release();
 	uint16_t tempo_bpm() const;
+	float swing() const;
 	float randomness() const;
 	uint8_t sequence_length() const;
 	uint8_t range_octaves() const;
 	const char* quantization_mode_name() const;
 	float last_raw_voltage() const;
 	float last_quantized_voltage() const;
+	uint32_t base_interval_us() const;
+	uint32_t current_interval_us() const;
 
 private:
 	static constexpr uint8_t POT_INDEX_BPM = 0;
 	static constexpr uint8_t POT_INDEX_RANGE_OR_QUANTIZATION = 1;
 	static constexpr uint8_t POT_INDEX_RANDOMNESS_OR_LENGTH = 2;
+	static constexpr uint8_t POT_FUNCTION_ID_NONE = 255;
+	static constexpr uint8_t POT_FUNCTION_ID_BPM = 1;
+	static constexpr uint8_t POT_FUNCTION_ID_SWING = 2;
+	static constexpr uint8_t POT_FUNCTION_ID_RANGE = 3;
+	static constexpr uint8_t POT_FUNCTION_ID_RANDOMNESS = 4;
+	static constexpr uint8_t POT_FUNCTION_ID_QUANTIZATION = 5;
+	static constexpr uint8_t POT_FUNCTION_ID_LENGTH = 6;
+	static constexpr uint8_t POT_FUNCTION_PICKUP_HYSTERESIS = 1;
+	static constexpr uint8_t NUM_POTS = 3;
 	static constexpr uint16_t BPM_MIN = 60;
 	static constexpr uint16_t BPM_MAX = 240;
+	static constexpr float SWING_MAX = 0.40f;
 	static constexpr uint8_t RANGE_OCTAVES_MIN = 0;
 	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
 	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
@@ -65,6 +79,7 @@ private:
 	Sequence sequence_a_;
 	std::array<Step, Sequence::kMaxSteps> sequence_b_steps_;
 	brain::ui::Pots pots_;
+	brain::ui::PotMultiFunction pot_multi_function_;
 	brain::io::AudioCvOut dac_;
 	brain::io::Pulse gate_;
 	brain::ui::ButtonLed button_led_;
@@ -74,18 +89,17 @@ private:
 	bool gate_active_;
 	uint16_t bpm_;
 	uint32_t tick_interval_us_;
-	uint64_t last_tick_time_us_;
+	uint64_t next_tick_due_us_;
 	uint64_t gate_off_time_us_;
 	uint32_t tick_counter_;
+	uint32_t current_step_interval_us_;
 	bool shift_active_;
+	bool last_shift_context_;
+	float swing_amount_;
 	uint8_t range_octaves_;
-	uint8_t previous_range_octaves_;
 	QuantizationMode quantization_mode_;
-	uint8_t previous_quantization_mode_index_;
 	uint8_t randomness_pot_value_;
 	float mutation_probability_;
-	uint8_t previous_randomness_pot_value_;
-	uint8_t previous_length_;
 	float last_raw_voltage_;
 	float last_quantized_voltage_;
 	uint32_t rng_state_a_;
@@ -93,14 +107,19 @@ private:
 
 	void init_sequence();
 	void init_io();
-	void update_bpm_from_pot(bool force_log = false);
-	void update_range_or_quantization_from_pot2(bool force_log = false);
-	void update_randomness_or_length_from_pot3(bool force_log = false);
+	void init_pot_functions();
+	void set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function);
+	void update_pot_mappings(bool force_apply = false);
+	void update_bpm_from_pot(bool force_apply = false);
+	void update_swing_from_pot1(bool force_apply = false);
+	void update_range_or_quantization_from_pot2(bool force_apply = false);
+	void update_randomness_or_length_from_pot3(bool force_apply = false);
 	void apply_mutation_for_step(uint8_t step_index);
 	void tick(uint64_t now_us);
 	void reset_transport();
 	float apply_pitch_range(float source_voltage) const;
 	float quantize_voltage(float voltage) const;
+	uint32_t compute_next_step_interval_us() const;
 	static const char* quantization_mode_to_string(QuantizationMode mode);
 	static uint32_t next_random(uint32_t& state);
 	static float random_unit(uint32_t& state);
