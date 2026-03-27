@@ -4,6 +4,7 @@
 #include <pico/stdlib.h>
 
 #include "brain-common/brain-gpio-setup.h"
+#include "brain-io/midi-parser.h"
 #include "brain-ui/button.h"
 #include "midi-to-cv-engine.h"
 #include "sequencer-engine.h"
@@ -29,6 +30,8 @@ private:
 	AppMode mode_;
 	MidiToCVEngine midi_to_cv_engine_;
 	SequencerEngine sequencer_engine_;
+	brain::io::MidiParser sequencer_midi_parser_;
+	bool sequencer_midi_parser_initialized_;
 	bool button_a_pressed_;
 	bool button_b_pressed_;
 	bool button_a_pending_single_press_;
@@ -42,6 +45,7 @@ private:
 	bool status_has_text_;
 	uint8_t status_line_count_;
 	char status_text_[512];
+	static AppController* instance_;
 
 	void on_button_a_press();
 	void on_button_a_release();
@@ -54,6 +58,10 @@ private:
 	void clear_dual_button_tracking();
 	void check_toggle_mode();
 	void check_handle_short_dual_button_on_release(absolute_time_t released_at);
+	void ensure_sequencer_midi_parser_initialized();
+	void update_sequencer_midi_realtime();
+	static void on_sequencer_midi_realtime(uint8_t status);
+	void handle_sequencer_midi_realtime(uint8_t status);
 	void render_status_block();
 	void set_mode(AppMode mode);
 };

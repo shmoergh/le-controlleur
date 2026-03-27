@@ -3,13 +3,20 @@
 #include <cstring>
 #include <stdio.h>
 
+#include "pico/time.h"
+
+#include "debug-log.h"
 #include "settings-storage.h"
+
+AppController* AppController::instance_ = nullptr;
 
 AppController::AppController() :
 	button_a_(GPIO_BRAIN_BUTTON_1),
 	button_b_(GPIO_BRAIN_BUTTON_2),
 	mode_(AppMode::kMidiToCv),
 	midi_to_cv_engine_(brain::io::AudioCvOutChannel::kChannelB, 1),
+	sequencer_midi_parser_(1, true),
+	sequencer_midi_parser_initialized_(false),
 	button_a_pressed_(false),
 	button_b_pressed_(false),
 	button_a_pending_single_press_(false),
@@ -23,6 +30,7 @@ AppController::AppController() :
 	status_has_text_(false),
 	status_line_count_(0),
 	status_text_{0} {
+	instance_ = this;
 	button_a_.init();
 	button_b_.init();
 
@@ -30,10 +38,13 @@ AppController::AppController() :
 	button_a_.set_on_release([this]() { on_button_a_release(); });
 	button_b_.set_on_press([this]() { on_button_b_press(); });
 	button_b_.set_on_release([this]() { on_button_b_release(); });
+	sequencer_midi_parser_.set_realtime_callback(&AppController::on_sequencer_midi_realtime);
 
 	uint8_t persisted_mode = static_cast<uint8_t>(AppMode::kMidiToCv);
 	if (load_persisted_app_mode(persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
 		mode_ = AppMode::kSequencer;
+		ensure_sequencer_midi_parser_initialized();
+		sequencer_midi_parser_.reset();
 		sequencer_engine_.on_mode_enter();
 	}
 }
@@ -51,6 +62,7 @@ void AppController::update() {
 			break;
 		}
 		case AppMode::kSequencer:
+			update_sequencer_midi_realtime();
 			sequencer_engine_.update();
 			break;
 	}
@@ -289,6 +301,56 @@ void AppController::check_handle_short_dual_button_on_release(absolute_time_t re
 	dual_button_action_handled_ = true;
 }
 
+void AppController::ensure_sequencer_midi_parser_initialized() {
+	if (sequencer_midi_parser_initialized_) {
+		return;
+	}
+
+	sequencer_midi_parser_initialized_ = sequencer_midi_parser_.init_uart();
+	if (!sequencer_midi_parser_initialized_) {
+		LOG_ERROR("APP", "failed to init sequencer realtime midi parser");
+	}
+}
+
+void AppController::update_sequencer_midi_realtime() {
+	ensure_sequencer_midi_parser_initialized();
+	if (!sequencer_midi_parser_initialized_) {
+		return;
+	}
+	sequencer_midi_parser_.process_uart();
+}
+
+void AppController::on_sequencer_midi_realtime(uint8_t status) {
+	if (instance_ == nullptr) {
+		return;
+	}
+	instance_->handle_sequencer_midi_realtime(status);
+}
+
+void AppController::handle_sequencer_midi_realtime(uint8_t status) {
+	if (mode_ != AppMode::kSequencer) {
+		return;
+	}
+
+	const uint64_t now_us = time_us_64();
+	switch (status) {
+		case 0xF8:  // Clock
+			sequencer_engine_.on_midi_clock_tick(now_us);
+			break;
+		case 0xFA:  // Start
+			sequencer_engine_.on_midi_transport_start();
+			break;
+		case 0xFB:  // Continue
+			sequencer_engine_.on_midi_transport_continue();
+			break;
+		case 0xFC:  // Stop
+			sequencer_engine_.on_midi_transport_stop();
+			break;
+		default:
+			break;
+	}
+}
+
 void AppController::render_status_block() {
 	char current_status[512];
 	uint8_t line_count = 0;
@@ -304,8 +366,27 @@ void AppController::render_status_block() {
 		line_count = 2;
 	} else {
 		char tempo_text[32];
+		char transport_text[24];
+		transport_text[0] = '\0';
 		if (sequencer_engine_.external_sync_enabled()) {
-			snprintf(tempo_text, sizeof(tempo_text), "%s", "EXT (Pulse In)");
+			switch (sequencer_engine_.external_clock_source()) {
+				case ExternalClockSource::kExternalPulse:
+					snprintf(tempo_text, sizeof(tempo_text), "%s", "EXT (Pulse In)");
+					break;
+				case ExternalClockSource::kExternalMidi:
+					snprintf(tempo_text, sizeof(tempo_text), "%s", "EXT (MIDI Clock)");
+					snprintf(
+						transport_text,
+						sizeof(transport_text),
+						"\nTransport: %s",
+						sequencer_engine_.midi_transport_running() ? "RUN" : "STOP"
+					);
+					break;
+				case ExternalClockSource::kInternal:
+				default:
+					snprintf(tempo_text, sizeof(tempo_text), "%s", "EXT (Waiting)");
+					break;
+			}
 		} else {
 			snprintf(tempo_text, sizeof(tempo_text), "%u", static_cast<unsigned>(sequencer_engine_.tempo_bpm()));
 		}
@@ -314,7 +395,7 @@ void AppController::render_status_block() {
 			current_status,
 			sizeof(current_status),
 			"MODE: SEQUENCER\n"
-			"Tempo: %s\n"
+			"Tempo: %s%s\n"
 			"Swing: %.1f%%\n"
 			"Randomness: %.2f\n"
 			"Sequence Length: %u\n"
@@ -324,6 +405,7 @@ void AppController::render_status_block() {
 			"Timing: base=%luus current=%luus\n"
 			"Gate History: %s",
 			tempo_text,
+			transport_text,
 			sequencer_engine_.swing() * 100.0f,
 			sequencer_engine_.randomness(),
 			static_cast<unsigned>(sequencer_engine_.sequence_length()),
@@ -335,7 +417,7 @@ void AppController::render_status_block() {
 			static_cast<unsigned long>(sequencer_engine_.current_interval_us()),
 			sequencer_engine_.gate_history()
 		);
-		line_count = 10;
+		line_count = static_cast<uint8_t>(10 + (transport_text[0] != '\0' ? 1 : 0));
 	}
 
 	if (status_has_text_ && strcmp(current_status, status_text_) == 0) {
@@ -362,6 +444,12 @@ void AppController::set_mode(AppMode mode) {
 		return;
 	}
 
+	const bool entering_sequencer = (mode == AppMode::kSequencer);
+	if (entering_sequencer) {
+		// Play the shared 6-LED animation while LEDs are still in MIDI/simple mode.
+		midi_to_cv_engine_.play_startup_animation();
+	}
+
 	if (mode_ == AppMode::kSequencer) {
 		sequencer_engine_.on_mode_exit();
 	}
@@ -370,10 +458,14 @@ void AppController::set_mode(AppMode mode) {
 	mode_ = mode;
 
 	if (mode_ == AppMode::kSequencer) {
+		ensure_sequencer_midi_parser_initialized();
+		sequencer_midi_parser_.reset();
 		sequencer_engine_.on_mode_enter();
 	}
 
 	save_persisted_app_mode(static_cast<uint8_t>(mode_));
 
-	midi_to_cv_engine_.play_startup_animation();
+	if (!entering_sequencer) {
+		midi_to_cv_engine_.play_startup_animation();
+	}
 }

@@ -27,6 +27,13 @@ SequencerEngine::SequencerEngine() :
 	last_pulse_in_high_(false),
 	last_external_tick_us_(0),
 	external_interval_us_(125000),
+	last_midi_clock_tick_us_(0),
+	last_midi_event_us_(0),
+	midi_interval_us_(125000),
+	midi_clock_ticks_since_step_(0),
+	pending_midi_step_events_(0),
+	midi_transport_running_(false),
+	external_clock_source_(ExternalClockSource::kInternal),
 	external_swing_tick_pending_(false),
 	external_swing_tick_due_us_(0),
 	last_raw_voltage_(0.0f),
@@ -54,58 +61,36 @@ void SequencerEngine::update() {
 	const uint64_t now_us = time_us_64();
 	update_pot_led_overlay(now_us);
 	const bool pulse_in_high = gate_.read();
+	if (pulse_in_high && !last_pulse_in_high_) {
+		handle_external_pulse_edge(now_us);
+	}
+	last_pulse_in_high_ = pulse_in_high;
+	update_external_clock_source(now_us);
+	if (external_clock_source_ == ExternalClockSource::kExternalPulse) {
+		pending_midi_step_events_ = 0;
+	}
 
 	if (gate_active_ && now_us >= gate_off_time_us_) {
 		gate_.set(false);
 		gate_active_ = false;
 	}
+	handle_pending_external_swing_tick(now_us);
 
 	if (!playing_) {
-		last_pulse_in_high_ = pulse_in_high;
 		return;
 	}
 
 	if (external_sync_enabled_) {
-		if (external_swing_tick_pending_ && now_us >= external_swing_tick_due_us_) {
-			external_swing_tick_pending_ = false;
-			tick(now_us);
-		}
-
-		if (pulse_in_high && !last_pulse_in_high_) {
-			if (external_swing_tick_pending_) {
-				// Avoid dropping a delayed swung step when external pulses arrive faster than expected.
-				external_swing_tick_pending_ = false;
-				tick(now_us);
-			}
-
-			if (last_external_tick_us_ != 0 && now_us > last_external_tick_us_) {
-				const uint32_t pulse_interval_us = static_cast<uint32_t>(now_us - last_external_tick_us_);
-				if (pulse_interval_us >= 1000u && pulse_interval_us <= 2000000u) {
-					const int32_t error =
-						static_cast<int32_t>(pulse_interval_us) - static_cast<int32_t>(external_interval_us_);
-					external_interval_us_ = static_cast<uint32_t>(
-						static_cast<int32_t>(external_interval_us_) + (error >> EXTERNAL_CLOCK_EMA_SHIFT)
-					);
-				}
-			}
-			last_external_tick_us_ = now_us;
-			tick_interval_us_ = external_interval_us_;
-
-			const uint32_t swing_delta = compute_swing_delta_us(external_interval_us_);
-			const bool delay_this_step = (swing_delta > 0u) && ((tick_counter_ & 1u) == 1u);
-			if (delay_this_step) {
-				external_swing_tick_pending_ = true;
-				external_swing_tick_due_us_ = now_us + swing_delta;
-				current_step_interval_us_ = external_interval_us_ + swing_delta;
-			} else {
-				current_step_interval_us_ = external_interval_us_;
-				tick(now_us);
+		if (external_clock_source_ == ExternalClockSource::kExternalMidi) {
+			uint8_t safety_counter = 0;
+			while (pending_midi_step_events_ > 0 && safety_counter < 8) {
+				--pending_midi_step_events_;
+				on_external_step_event(ExternalClockSource::kExternalMidi, now_us);
+				++safety_counter;
 			}
 		}
-		last_pulse_in_high_ = pulse_in_high;
 		return;
 	}
-	last_pulse_in_high_ = pulse_in_high;
 
 	if (next_tick_due_us_ == 0) {
 		next_tick_due_us_ = now_us;
@@ -125,6 +110,8 @@ void SequencerEngine::on_mode_enter() {
 		return;
 	}
 
+	// Shared 6-LED bus: sequencer uses PWM for dim overlays.
+	leds_.set_mode(brain::ui::LedMode::kPwm);
 	reset_transport();
 	shift_active_ = false;
 	last_shift_context_ = shift_active_;
@@ -137,6 +124,9 @@ void SequencerEngine::on_mode_exit() {
 	}
 
 	reset_transport();
+	// Return shared LEDs to simple GPIO mode for MIDI 2 CV.
+	leds_.set_mode(brain::ui::LedMode::kSimple);
+	leds_.off_all();
 	shift_active_ = false;
 	last_shift_context_ = shift_active_;
 }
@@ -151,13 +141,11 @@ void SequencerEngine::on_button_a_short_press() {
 	if (playing_) {
 		next_tick_due_us_ = 0;
 		tick_counter_ = 0;
-		external_swing_tick_pending_ = false;
-		external_swing_tick_due_us_ = 0;
+		clear_external_swing_pending();
 	} else {
 		gate_.set(false);
 		gate_active_ = false;
-		external_swing_tick_pending_ = false;
-		external_swing_tick_due_us_ = 0;
+		clear_external_swing_pending();
 		button_led_.off();
 	}
 }
@@ -178,6 +166,204 @@ void SequencerEngine::on_button_b_release() {
 
 	shift_active_ = false;
 	update_pot_mappings();
+}
+
+void SequencerEngine::on_midi_clock_tick(uint64_t event_us) {
+	if (!initialized_ || !midi_transport_running_) {
+		return;
+	}
+
+	if (last_midi_clock_tick_us_ != 0 && event_us > last_midi_clock_tick_us_) {
+		const uint32_t midi_clock_interval_us = static_cast<uint32_t>(event_us - last_midi_clock_tick_us_);
+		if (midi_clock_interval_us >= MIDI_CLOCK_INTERVAL_MIN_US
+			&& midi_clock_interval_us <= MIDI_CLOCK_INTERVAL_MAX_US) {
+			const uint32_t midi_step_interval_us = midi_clock_interval_us * MIDI_CLOCKS_PER_SEQUENCER_STEP;
+			const int32_t error =
+				static_cast<int32_t>(midi_step_interval_us) - static_cast<int32_t>(midi_interval_us_);
+			midi_interval_us_ = static_cast<uint32_t>(
+				static_cast<int32_t>(midi_interval_us_) + (error >> EXTERNAL_CLOCK_EMA_SHIFT)
+			);
+		}
+	}
+
+	last_midi_clock_tick_us_ = event_us;
+	last_midi_event_us_ = event_us;
+
+	if (!external_sync_enabled_) {
+		return;
+	}
+
+	++midi_clock_ticks_since_step_;
+	if (midi_clock_ticks_since_step_ < MIDI_CLOCKS_PER_SEQUENCER_STEP) {
+		return;
+	}
+	midi_clock_ticks_since_step_ = 0;
+	if (pending_midi_step_events_ < 255u) {
+		++pending_midi_step_events_;
+	}
+}
+
+void SequencerEngine::on_midi_transport_start() {
+	if (!initialized_) {
+		return;
+	}
+
+	midi_transport_running_ = true;
+	midi_clock_ticks_since_step_ = 0;
+	pending_midi_step_events_ = 0;
+	clear_external_swing_pending();
+
+	if (!external_sync_enabled_ || external_clock_source_ == ExternalClockSource::kExternalPulse) {
+		return;
+	}
+
+	sequence_a_.position = 0;
+	tick_counter_ = 0;
+	playing_ = true;
+	next_tick_due_us_ = 0;
+	gate_.set(false);
+	gate_active_ = false;
+}
+
+void SequencerEngine::on_midi_transport_continue() {
+	if (!initialized_) {
+		return;
+	}
+
+	midi_transport_running_ = true;
+	midi_clock_ticks_since_step_ = 0;
+	pending_midi_step_events_ = 0;
+	clear_external_swing_pending();
+
+	if (!external_sync_enabled_ || external_clock_source_ == ExternalClockSource::kExternalPulse) {
+		return;
+	}
+
+	playing_ = true;
+	next_tick_due_us_ = 0;
+}
+
+void SequencerEngine::on_midi_transport_stop() {
+	if (!initialized_) {
+		return;
+	}
+
+	midi_transport_running_ = false;
+	midi_clock_ticks_since_step_ = 0;
+	pending_midi_step_events_ = 0;
+	clear_external_swing_pending();
+
+	if (!external_sync_enabled_ || external_clock_source_ == ExternalClockSource::kExternalPulse) {
+		return;
+	}
+
+	playing_ = false;
+	gate_.set(false);
+	gate_active_ = false;
+	button_led_.off();
+}
+
+void SequencerEngine::on_external_step_event(ExternalClockSource source, uint64_t event_us) {
+	if (!initialized_ || !external_sync_enabled_ || !playing_) {
+		return;
+	}
+
+	uint32_t base_interval_us = tick_interval_us_;
+	switch (source) {
+		case ExternalClockSource::kExternalPulse:
+			base_interval_us = external_interval_us_;
+			last_external_tick_us_ = event_us;
+			break;
+		case ExternalClockSource::kExternalMidi:
+			base_interval_us = midi_interval_us_;
+			last_midi_event_us_ = event_us;
+			break;
+		case ExternalClockSource::kInternal:
+		default:
+			return;
+	}
+
+	tick_interval_us_ = base_interval_us;
+
+	if (external_swing_tick_pending_) {
+		// Avoid dropping a delayed swung step when external steps arrive faster than expected.
+		external_swing_tick_pending_ = false;
+		tick(event_us);
+	}
+
+	const uint32_t swing_delta = compute_swing_delta_us(base_interval_us);
+	const bool delay_this_step = (swing_delta > 0u) && ((tick_counter_ & 1u) == 1u);
+	if (delay_this_step) {
+		external_swing_tick_pending_ = true;
+		external_swing_tick_due_us_ = event_us + swing_delta;
+		current_step_interval_us_ = base_interval_us + swing_delta;
+		return;
+	}
+
+	current_step_interval_us_ = base_interval_us;
+	tick(event_us);
+}
+
+void SequencerEngine::update_external_clock_source(uint64_t now_us) {
+	const ExternalClockSource previous_source = external_clock_source_;
+	if (!external_sync_enabled_) {
+		external_clock_source_ = ExternalClockSource::kInternal;
+		return;
+	}
+
+	const bool pulse_active = is_external_source_active(now_us, last_external_tick_us_, external_interval_us_);
+	const bool midi_active = midi_transport_running_
+		&& is_external_source_active(now_us, last_midi_event_us_, midi_interval_us_);
+
+	if (pulse_active) {
+		external_clock_source_ = ExternalClockSource::kExternalPulse;
+	} else if (midi_active) {
+		external_clock_source_ = ExternalClockSource::kExternalMidi;
+	} else {
+		external_clock_source_ = ExternalClockSource::kInternal;
+	}
+
+	if (external_clock_source_ != previous_source) {
+		clear_external_swing_pending();
+		if (external_clock_source_ != ExternalClockSource::kExternalMidi) {
+			pending_midi_step_events_ = 0;
+		}
+	}
+}
+
+void SequencerEngine::handle_external_pulse_edge(uint64_t now_us) {
+	if (last_external_tick_us_ != 0 && now_us > last_external_tick_us_) {
+		const uint32_t pulse_interval_us = static_cast<uint32_t>(now_us - last_external_tick_us_);
+		if (pulse_interval_us >= EXTERNAL_EVENT_INTERVAL_MIN_US && pulse_interval_us <= EXTERNAL_EVENT_INTERVAL_MAX_US) {
+			const int32_t error = static_cast<int32_t>(pulse_interval_us) - static_cast<int32_t>(external_interval_us_);
+			external_interval_us_ = static_cast<uint32_t>(
+				static_cast<int32_t>(external_interval_us_) + (error >> EXTERNAL_CLOCK_EMA_SHIFT)
+			);
+		}
+	}
+	last_external_tick_us_ = now_us;
+	if (!external_sync_enabled_) {
+		return;
+	}
+	on_external_step_event(ExternalClockSource::kExternalPulse, now_us);
+}
+
+void SequencerEngine::handle_pending_external_swing_tick(uint64_t now_us) {
+	if (!external_sync_enabled_ || !playing_ || !external_swing_tick_pending_) {
+		return;
+	}
+
+	if (now_us < external_swing_tick_due_us_) {
+		return;
+	}
+
+	external_swing_tick_pending_ = false;
+	tick(now_us);
+}
+
+void SequencerEngine::clear_external_swing_pending() {
+	external_swing_tick_pending_ = false;
+	external_swing_tick_due_us_ = 0;
 }
 
 void SequencerEngine::init_sequence() {
@@ -229,7 +415,8 @@ void SequencerEngine::init_io() {
 
 	gate_.begin();
 	gate_.set(false);
-	leds_.init();
+	// Keep simple mode when sequencer is inactive so MIDI 2 CV LED writes work.
+	leds_.init(brain::ui::LedMode::kSimple);
 	leds_.off_all();
 	button_led_.init();
 	button_led_.off();
@@ -352,8 +539,13 @@ void SequencerEngine::update_bpm_from_pot(bool force_apply) {
 			next_tick_due_us_ = 0;
 			last_external_tick_us_ = 0;
 			external_interval_us_ = tick_interval_us_;
-			external_swing_tick_pending_ = false;
-			external_swing_tick_due_us_ = 0;
+			last_midi_event_us_ = 0;
+			last_midi_clock_tick_us_ = 0;
+			midi_interval_us_ = tick_interval_us_;
+			midi_clock_ticks_since_step_ = 0;
+			pending_midi_step_events_ = 0;
+			external_clock_source_ = ExternalClockSource::kInternal;
+			clear_external_swing_pending();
 		}
 		return;
 	}
@@ -367,8 +559,8 @@ void SequencerEngine::update_bpm_from_pot(bool force_apply) {
 	if (was_external_sync_enabled) {
 		// Leaving external sync: restart internal scheduler from "now".
 		next_tick_due_us_ = 0;
-		external_swing_tick_pending_ = false;
-		external_swing_tick_due_us_ = 0;
+		external_clock_source_ = ExternalClockSource::kInternal;
+		clear_external_swing_pending();
 	}
 }
 
@@ -702,6 +894,7 @@ void SequencerEngine::tick(uint64_t now_us) {
 
 void SequencerEngine::reset_transport() {
 	playing_ = false;
+	midi_transport_running_ = false;
 	sequence_a_.position = 0;
 	next_tick_due_us_ = 0;
 	gate_off_time_us_ = 0;
@@ -717,8 +910,13 @@ void SequencerEngine::reset_transport() {
 	last_pulse_in_high_ = gate_.read();
 	last_external_tick_us_ = 0;
 	external_interval_us_ = tick_interval_us_;
-	external_swing_tick_pending_ = false;
-	external_swing_tick_due_us_ = 0;
+	last_midi_clock_tick_us_ = 0;
+	last_midi_event_us_ = 0;
+	midi_interval_us_ = tick_interval_us_;
+	midi_clock_ticks_since_step_ = 0;
+	pending_midi_step_events_ = 0;
+	external_clock_source_ = ExternalClockSource::kInternal;
+	clear_external_swing_pending();
 	reset_gate_history();
 	button_led_.off();
 }
@@ -728,12 +926,46 @@ uint32_t SequencerEngine::compute_swing_delta_us(uint32_t base_interval_us) cons
 		return 0u;
 	}
 
-	// swing_delta = base * ((pot/255) * SWING_MAX), with SWING_MAX = 30%.
+	// swing_delta = base * ((pot/255) * SWING_MAX), with SWING_MAX = 50%.
 	const uint32_t swing_divisor = 255u * SWING_MAX_DENOMINATOR;
 	const uint32_t swing_round = swing_divisor / 2u;
 	return static_cast<uint32_t>(
 		(static_cast<uint64_t>(base_interval_us) * swing_pot_value_ * SWING_MAX_NUMERATOR + swing_round) / swing_divisor
 	);
+}
+
+uint32_t SequencerEngine::compute_external_source_timeout_us(uint32_t estimated_step_interval_us) const {
+	uint32_t base_interval_us = estimated_step_interval_us;
+	if (base_interval_us == 0u) {
+		base_interval_us = tick_interval_us_;
+	}
+
+	uint64_t timeout_us = static_cast<uint64_t>(base_interval_us) * 3u;
+	if (timeout_us < EXTERNAL_SOURCE_TIMEOUT_MIN_US) {
+		timeout_us = EXTERNAL_SOURCE_TIMEOUT_MIN_US;
+	}
+	if (timeout_us > EXTERNAL_SOURCE_TIMEOUT_MAX_US) {
+		timeout_us = EXTERNAL_SOURCE_TIMEOUT_MAX_US;
+	}
+	return static_cast<uint32_t>(timeout_us);
+}
+
+bool SequencerEngine::is_external_source_active(
+	uint64_t now_us,
+	uint64_t last_event_us,
+	uint32_t estimated_step_interval_us
+) const {
+	if (last_event_us == 0) {
+		return false;
+	}
+
+	if (now_us <= last_event_us) {
+		return true;
+	}
+
+	const uint64_t event_age_us = now_us - last_event_us;
+	const uint32_t timeout_us = compute_external_source_timeout_us(estimated_step_interval_us);
+	return event_age_us < timeout_us;
 }
 
 uint32_t SequencerEngine::compute_next_step_interval_us() const {
@@ -878,6 +1110,14 @@ uint16_t SequencerEngine::tempo_bpm() const {
 
 bool SequencerEngine::external_sync_enabled() const {
 	return external_sync_enabled_;
+}
+
+ExternalClockSource SequencerEngine::external_clock_source() const {
+	return external_clock_source_;
+}
+
+bool SequencerEngine::midi_transport_running() const {
+	return midi_transport_running_;
 }
 
 float SequencerEngine::swing() const {

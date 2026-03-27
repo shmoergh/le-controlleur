@@ -32,6 +32,12 @@ enum class QuantizationMode : uint8_t {
 	kExtra = 5
 };
 
+enum class ExternalClockSource : uint8_t {
+	kInternal = 0,
+	kExternalPulse = 1,
+	kExternalMidi = 2
+};
+
 class SequencerEngine {
 public:
 	SequencerEngine();
@@ -41,8 +47,15 @@ public:
 	void on_button_a_short_press();
 	void on_button_b_press();
 	void on_button_b_release();
+	void on_midi_clock_tick(uint64_t event_us);
+	void on_midi_transport_start();
+	void on_midi_transport_continue();
+	void on_midi_transport_stop();
+	void on_external_step_event(ExternalClockSource source, uint64_t event_us);
 	uint16_t tempo_bpm() const;
 	bool external_sync_enabled() const;
+	ExternalClockSource external_clock_source() const;
+	bool midi_transport_running() const;
 	float swing() const;
 	float randomness() const;
 	uint8_t sequence_length() const;
@@ -81,6 +94,7 @@ private:
 	static constexpr uint8_t SWING_MAX_NUMERATOR = 1;   // 50%
 	static constexpr uint8_t SWING_MAX_DENOMINATOR = 2;
 	static constexpr uint8_t EXTERNAL_CLOCK_EMA_SHIFT = 3;  // 1/8 new sample
+	static constexpr uint8_t MIDI_CLOCKS_PER_SEQUENCER_STEP = 6;
 	static constexpr uint8_t POT_LED_SOFT_BRIGHTNESS = 48;
 	static constexpr uint16_t PITCH_Q8_PER_SEMITONE = 256;
 	static constexpr uint16_t SEMITONES_PER_OCTAVE = 12;
@@ -88,6 +102,12 @@ private:
 	static constexpr uint16_t RANDOM_MAX_Q8 = SOURCE_RANGE_OCTAVES * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
 	static constexpr uint64_t POT_LED_OVERLAY_HOLD_US = 1000ULL * 1000ULL;
 	static constexpr uint8_t POT_LED_ACTIVITY_RAW_THRESHOLD = 3;
+	static constexpr uint32_t EXTERNAL_EVENT_INTERVAL_MIN_US = 1000u;
+	static constexpr uint32_t EXTERNAL_EVENT_INTERVAL_MAX_US = 2000000u;
+	static constexpr uint32_t MIDI_CLOCK_INTERVAL_MIN_US = 500u;
+	static constexpr uint32_t MIDI_CLOCK_INTERVAL_MAX_US = 500000u;
+	static constexpr uint32_t EXTERNAL_SOURCE_TIMEOUT_MIN_US = 150000u;
+	static constexpr uint32_t EXTERNAL_SOURCE_TIMEOUT_MAX_US = 2000000u;
 
 	Sequence sequence_a_;
 	std::array<Step, Sequence::kMaxSteps> sequence_b_steps_;
@@ -116,8 +136,15 @@ private:
 	uint8_t mutation_threshold_;
 	bool external_sync_enabled_;
 	bool last_pulse_in_high_;
-	uint64_t last_external_tick_us_;  // Last external pulse edge timestamp
-	uint32_t external_interval_us_;
+	uint64_t last_external_tick_us_;  // Last external pulse edge timestamp.
+	uint32_t external_interval_us_;    // Pulse-derived external step interval estimate.
+	uint64_t last_midi_clock_tick_us_;
+	uint64_t last_midi_event_us_;
+	uint32_t midi_interval_us_;
+	uint8_t midi_clock_ticks_since_step_;
+	uint8_t pending_midi_step_events_;
+	bool midi_transport_running_;
+	ExternalClockSource external_clock_source_;
 	bool external_swing_tick_pending_;
 	uint64_t external_swing_tick_due_us_;
 	float last_raw_voltage_;
@@ -153,8 +180,14 @@ private:
 	void refresh_gate_history_view();
 	uint8_t gate_history_mask() const;
 	void tick(uint64_t now_us);
+	void update_external_clock_source(uint64_t now_us);
+	void handle_external_pulse_edge(uint64_t now_us);
+	void handle_pending_external_swing_tick(uint64_t now_us);
+	void clear_external_swing_pending();
 	void reset_transport();
 	uint32_t compute_swing_delta_us(uint32_t base_interval_us) const;
+	uint32_t compute_external_source_timeout_us(uint32_t estimated_step_interval_us) const;
+	bool is_external_source_active(uint64_t now_us, uint64_t last_event_us, uint32_t estimated_step_interval_us) const;
 	uint16_t apply_pitch_range(uint16_t source_q8) const;
 	uint16_t quantize_pitch(uint16_t pitch_q8) const;
 	uint32_t compute_next_step_interval_us() const;
