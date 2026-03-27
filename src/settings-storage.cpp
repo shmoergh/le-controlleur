@@ -11,8 +11,11 @@ namespace {
 constexpr uint32_t SETTINGS_MAGIC = 0x4C435452;  // "LCTR"
 constexpr uint8_t SETTINGS_VERSION_V1 = 1;
 constexpr uint8_t SETTINGS_VERSION_V2 = 2;
+constexpr uint8_t SETTINGS_VERSION_V3 = 3;
 constexpr uint8_t APP_MODE_MIDI_TO_CV = 0;
 constexpr uint8_t APP_MODE_SEQUENCER = 1;
+constexpr uint8_t ROOT_NOTE_MIN = 0;
+constexpr uint8_t ROOT_NOTE_MAX = 11;
 
 #ifndef PICO_FLASH_SIZE_BYTES
 #define PICO_FLASH_SIZE_BYTES (2 * 1024 * 1024)
@@ -37,6 +40,15 @@ struct PersistedSettingsV2 {
 	uint32_t checksum;
 };
 
+struct PersistedSettingsV3 {
+	uint32_t magic;
+	uint8_t version;
+	uint8_t midi_channel;
+	uint8_t app_mode;
+	uint8_t root_note;
+	uint32_t checksum;
+};
+
 template <typename TSettings>
 uint32_t checksum32(const TSettings& settings_without_checksum) {
 	const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&settings_without_checksum);
@@ -58,18 +70,41 @@ bool is_valid_app_mode(uint8_t mode) {
 	return mode == APP_MODE_MIDI_TO_CV || mode == APP_MODE_SEQUENCER;
 }
 
-PersistedSettingsV2 default_settings() {
-	PersistedSettingsV2 settings{};
+bool is_valid_root_note(uint8_t root_note) {
+	return root_note >= ROOT_NOTE_MIN && root_note <= ROOT_NOTE_MAX;
+}
+
+PersistedSettingsV3 default_settings() {
+	PersistedSettingsV3 settings{};
 	settings.magic = SETTINGS_MAGIC;
-	settings.version = SETTINGS_VERSION_V2;
+	settings.version = SETTINGS_VERSION_V3;
 	settings.midi_channel = 1;
 	settings.app_mode = APP_MODE_MIDI_TO_CV;
-	settings.reserved[0] = 0;
+	settings.root_note = 0;
 	settings.checksum = checksum32(settings);
 	return settings;
 }
 
-bool load_v2(const PersistedSettingsV2& flash_settings, PersistedSettingsV2& out_settings) {
+bool load_v3(const PersistedSettingsV3& flash_settings, PersistedSettingsV3& out_settings) {
+	if (flash_settings.magic != SETTINGS_MAGIC || flash_settings.version != SETTINGS_VERSION_V3) {
+		return false;
+	}
+	if (!is_valid_midi_channel(flash_settings.midi_channel)
+		|| !is_valid_app_mode(flash_settings.app_mode)
+		|| !is_valid_root_note(flash_settings.root_note)) {
+		return false;
+	}
+
+	PersistedSettingsV3 candidate = flash_settings;
+	if (checksum32(candidate) != flash_settings.checksum) {
+		return false;
+	}
+
+	out_settings = flash_settings;
+	return true;
+}
+
+bool load_v2(const PersistedSettingsV2& flash_settings, PersistedSettingsV3& out_settings) {
 	if (flash_settings.magic != SETTINGS_MAGIC || flash_settings.version != SETTINGS_VERSION_V2) {
 		return false;
 	}
@@ -82,11 +117,14 @@ bool load_v2(const PersistedSettingsV2& flash_settings, PersistedSettingsV2& out
 		return false;
 	}
 
-	out_settings = flash_settings;
+	out_settings = default_settings();
+	out_settings.midi_channel = flash_settings.midi_channel;
+	out_settings.app_mode = flash_settings.app_mode;
+	out_settings.checksum = checksum32(out_settings);
 	return true;
 }
 
-bool load_v1(const PersistedSettingsV1& flash_settings, PersistedSettingsV2& out_settings) {
+bool load_v1(const PersistedSettingsV1& flash_settings, PersistedSettingsV3& out_settings) {
 	if (flash_settings.magic != SETTINGS_MAGIC || flash_settings.version != SETTINGS_VERSION_V1) {
 		return false;
 	}
@@ -105,10 +143,15 @@ bool load_v1(const PersistedSettingsV1& flash_settings, PersistedSettingsV2& out
 	return true;
 }
 
-bool load_settings(PersistedSettingsV2& out_settings) {
+bool load_settings(PersistedSettingsV3& out_settings) {
 	const uint8_t* flash_base = reinterpret_cast<const uint8_t*>(XIP_BASE + SETTINGS_FLASH_OFFSET);
-	const PersistedSettingsV2 flash_v2 = *reinterpret_cast<const PersistedSettingsV2*>(flash_base);
+	const PersistedSettingsV3 flash_v3 = *reinterpret_cast<const PersistedSettingsV3*>(flash_base);
 
+	if (load_v3(flash_v3, out_settings)) {
+		return true;
+	}
+
+	const PersistedSettingsV2 flash_v2 = *reinterpret_cast<const PersistedSettingsV2*>(flash_base);
 	if (load_v2(flash_v2, out_settings)) {
 		return true;
 	}
@@ -117,10 +160,10 @@ bool load_settings(PersistedSettingsV2& out_settings) {
 	return load_v1(flash_v1, out_settings);
 }
 
-bool write_settings(const PersistedSettingsV2& settings) {
-	PersistedSettingsV2 to_write = settings;
+bool write_settings(const PersistedSettingsV3& settings) {
+	PersistedSettingsV3 to_write = settings;
 	to_write.magic = SETTINGS_MAGIC;
-	to_write.version = SETTINGS_VERSION_V2;
+	to_write.version = SETTINGS_VERSION_V3;
 	to_write.checksum = checksum32(to_write);
 
 	uint8_t page_buffer[FLASH_PAGE_SIZE];
@@ -132,18 +175,20 @@ bool write_settings(const PersistedSettingsV2& settings) {
 	flash_range_program(SETTINGS_FLASH_OFFSET, page_buffer, FLASH_PAGE_SIZE);
 	restore_interrupts(interrupts);
 
-	PersistedSettingsV2 verify{};
+	PersistedSettingsV3 verify{};
 	if (!load_settings(verify)) {
 		return false;
 	}
 
-	return verify.midi_channel == to_write.midi_channel && verify.app_mode == to_write.app_mode;
+	return verify.midi_channel == to_write.midi_channel
+		&& verify.app_mode == to_write.app_mode
+		&& verify.root_note == to_write.root_note;
 }
 
 }  // namespace
 
 bool load_persisted_midi_channel(uint8_t& out_channel) {
-	PersistedSettingsV2 settings{};
+	PersistedSettingsV3 settings{};
 	if (!load_settings(settings)) {
 		return false;
 	}
@@ -157,14 +202,14 @@ bool save_persisted_midi_channel(uint8_t channel) {
 		return false;
 	}
 
-	PersistedSettingsV2 settings = default_settings();
+	PersistedSettingsV3 settings = default_settings();
 	load_settings(settings);
 	settings.midi_channel = channel;
 	return write_settings(settings);
 }
 
 bool load_persisted_app_mode(uint8_t& out_mode) {
-	PersistedSettingsV2 settings{};
+	PersistedSettingsV3 settings{};
 	if (!load_settings(settings)) {
 		return false;
 	}
@@ -178,8 +223,29 @@ bool save_persisted_app_mode(uint8_t mode) {
 		return false;
 	}
 
-	PersistedSettingsV2 settings = default_settings();
+	PersistedSettingsV3 settings = default_settings();
 	load_settings(settings);
 	settings.app_mode = mode;
+	return write_settings(settings);
+}
+
+bool load_persisted_root_note(uint8_t& out_root_note) {
+	PersistedSettingsV3 settings{};
+	if (!load_settings(settings)) {
+		return false;
+	}
+
+	out_root_note = settings.root_note;
+	return true;
+}
+
+bool save_persisted_root_note(uint8_t root_note) {
+	if (!is_valid_root_note(root_note)) {
+		return false;
+	}
+
+	PersistedSettingsV3 settings = default_settings();
+	load_settings(settings);
+	settings.root_note = root_note;
 	return write_settings(settings);
 }

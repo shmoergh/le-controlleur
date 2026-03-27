@@ -47,6 +47,10 @@ public:
 	void on_button_a_short_press();
 	void on_button_b_press();
 	void on_button_b_release();
+	void arm_root_edit();
+	void release_root_edit();
+	void on_root_edit_midi_note(uint8_t note);
+	void on_root_edit_pot_value(uint8_t value);
 	void on_midi_clock_tick(uint64_t event_us);
 	void on_midi_transport_start();
 	void on_midi_transport_continue();
@@ -61,6 +65,8 @@ public:
 	uint8_t sequence_length() const;
 	uint8_t range_octaves() const;
 	const char* quantization_mode_name() const;
+	const char* root_note_name() const;
+	bool root_edit_armed() const;
 	float last_raw_voltage() const;
 	float last_quantized_voltage() const;
 	uint32_t base_interval_us() const;
@@ -87,6 +93,7 @@ private:
 	static constexpr uint8_t RANGE_OCTAVES_MIN = 0;
 	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
 	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
+	static constexpr uint8_t ROOT_NOTE_COUNT = 12;
 	static constexpr uint8_t STEPS_PER_QUARTER_NOTE = 4;
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
@@ -102,6 +109,7 @@ private:
 	static constexpr uint16_t RANDOM_MAX_Q8 = SOURCE_RANGE_OCTAVES * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
 	static constexpr uint64_t POT_LED_OVERLAY_HOLD_US = 1000ULL * 1000ULL;
 	static constexpr uint8_t POT_LED_ACTIVITY_RAW_THRESHOLD = 3;
+	static constexpr uint8_t ROOT_EDIT_POT_RAW_THRESHOLD = 3;
 	static constexpr uint32_t EXTERNAL_EVENT_INTERVAL_MIN_US = 1000u;
 	static constexpr uint32_t EXTERNAL_EVENT_INTERVAL_MAX_US = 2000000u;
 	static constexpr uint32_t MIDI_CLOCK_INTERVAL_MIN_US = 500u;
@@ -132,6 +140,11 @@ private:
 	uint8_t swing_pot_value_;
 	uint8_t range_octaves_;
 	QuantizationMode quantization_mode_;
+	uint8_t root_note_;
+	bool has_persisted_root_note_;
+	uint8_t persisted_root_note_;
+	bool root_edit_armed_;
+	uint8_t root_edit_pot_reference_raw_;
 	uint8_t randomness_pot_value_;
 	uint8_t mutation_threshold_;
 	bool external_sync_enabled_;
@@ -166,12 +179,17 @@ private:
 	void update_swing_from_pot1(bool force_apply = false);
 	void update_range_or_quantization_from_pot2(bool force_apply = false);
 	void update_randomness_or_length_from_pot3(bool force_apply = false);
+	void check_root_edit_pot_input();
+	void set_root_note_live(uint8_t root_note);
+	void refresh_output_after_root_change();
+	void persist_root_note_if_needed();
 	uint8_t map_sequence_length_with_soft_snap(uint8_t pot_value) const;
 	bool is_power_of_two_sequence_length(uint8_t length) const;
 	uint8_t sequence_length_led_count(uint8_t length) const;
 	void apply_mutation_for_step(uint8_t step_index);
 	void update_pot_led_overlay(uint64_t now_us);
 	void show_active_pot_overlay(uint8_t pot_index);
+	void show_transpose_overlay();
 	uint8_t active_pot_percent_255(uint8_t pot_index) const;
 	uint8_t active_pot_led_mask(uint8_t pot_index) const;
 	uint8_t percent_to_led_mask(uint8_t percent_255) const;
@@ -192,6 +210,7 @@ private:
 	uint16_t quantize_pitch(uint16_t pitch_q8) const;
 	uint32_t compute_next_step_interval_us() const;
 	static const char* quantization_mode_to_string(QuantizationMode mode);
+	static const char* root_note_to_string(uint8_t root_note);
 	static uint32_t next_random(uint32_t& state);
 	static uint8_t random_u8(uint32_t& state);
 	static float pitch_q8_to_voltage(uint16_t pitch_q8);

@@ -25,8 +25,11 @@ AppController::AppController() :
 	button_b_single_press_dispatched_(false),
 	dual_button_active_(false),
 	dual_button_action_handled_(false),
+	sequencer_button_b_waiting_second_tap_(false),
+	sequencer_root_edit_hold_active_(false),
 	first_button_pressed_at_(0),
 	dual_button_started_at_(0),
+	sequencer_button_b_last_release_at_(0),
 	status_has_text_(false),
 	status_line_count_(0),
 	status_text_{0} {
@@ -39,6 +42,7 @@ AppController::AppController() :
 	button_b_.set_on_press([this]() { on_button_b_press(); });
 	button_b_.set_on_release([this]() { on_button_b_release(); });
 	sequencer_midi_parser_.set_realtime_callback(&AppController::on_sequencer_midi_realtime);
+	sequencer_midi_parser_.set_note_on_callback(&AppController::on_sequencer_midi_note_on);
 
 	uint8_t persisted_mode = static_cast<uint8_t>(AppMode::kMidiToCv);
 	if (load_persisted_app_mode(persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
@@ -122,6 +126,21 @@ void AppController::on_button_b_press() {
 
 	if (!button_a_pressed_) {
 		if (mode_ == AppMode::kSequencer) {
+			const bool second_tap_hold = sequencer_button_b_waiting_second_tap_
+				&& sequencer_button_b_last_release_at_ != 0
+				&& absolute_time_diff_us(sequencer_button_b_last_release_at_, now) <= BUTTON_DOUBLE_TAP_WINDOW_US;
+			if (second_tap_hold) {
+				sequencer_button_b_waiting_second_tap_ = false;
+				sequencer_root_edit_hold_active_ = true;
+				sequencer_engine_.arm_root_edit();
+				button_b_pending_single_press_ = false;
+				button_b_single_press_dispatched_ = false;
+				first_button_pressed_at_ = now;
+				return;
+			}
+
+			sequencer_root_edit_hold_active_ = false;
+			sequencer_button_b_waiting_second_tap_ = true;
 			sequencer_engine_.on_button_b_press();
 		}
 		first_button_pressed_at_ = now;
@@ -166,7 +185,13 @@ void AppController::start_dual_button_press(absolute_time_t started_at) {
 	}
 
 	if (mode_ == AppMode::kSequencer && button_b_pressed_) {
-		sequencer_engine_.on_button_b_release();
+		if (sequencer_root_edit_hold_active_) {
+			sequencer_engine_.release_root_edit();
+			sequencer_root_edit_hold_active_ = false;
+		} else {
+			sequencer_engine_.on_button_b_release();
+		}
+		sequencer_button_b_waiting_second_tap_ = false;
 	}
 
 	cancel_pending_single_button_presses();
@@ -204,7 +229,21 @@ void AppController::check_dispatch_single_button_release(bool is_button_a) {
 
 	if (mode_ == AppMode::kSequencer) {
 		if (!is_button_a) {
-			sequencer_engine_.on_button_b_release();
+			const absolute_time_t released_at = get_absolute_time();
+			int64_t press_duration_us = 0;
+			if (first_button_pressed_at_ != 0) {
+				press_duration_us = absolute_time_diff_us(first_button_pressed_at_, released_at);
+			}
+
+			if (sequencer_root_edit_hold_active_) {
+				sequencer_engine_.release_root_edit();
+				sequencer_root_edit_hold_active_ = false;
+				sequencer_button_b_waiting_second_tap_ = false;
+			} else {
+				sequencer_engine_.on_button_b_release();
+				sequencer_button_b_waiting_second_tap_ = press_duration_us <= BUTTON_SHORT_PRESS_MAX_US;
+			}
+			sequencer_button_b_last_release_at_ = released_at;
 			button_b_pending_single_press_ = false;
 			button_b_single_press_dispatched_ = false;
 			return;
@@ -257,6 +296,7 @@ void AppController::clear_dual_button_tracking() {
 	dual_button_action_handled_ = false;
 	first_button_pressed_at_ = 0;
 	dual_button_started_at_ = 0;
+	sequencer_root_edit_hold_active_ = false;
 	cancel_pending_single_button_presses();
 }
 
@@ -351,6 +391,21 @@ void AppController::handle_sequencer_midi_realtime(uint8_t status) {
 	}
 }
 
+void AppController::on_sequencer_midi_note_on(uint8_t note, uint8_t velocity, uint8_t channel) {
+	if (instance_ == nullptr) {
+		return;
+	}
+	instance_->handle_sequencer_midi_note_on(note, velocity, channel);
+}
+
+void AppController::handle_sequencer_midi_note_on(uint8_t note, uint8_t velocity, uint8_t channel) {
+	(void) channel;
+	if (mode_ != AppMode::kSequencer || velocity == 0u) {
+		return;
+	}
+	sequencer_engine_.on_root_edit_midi_note(note);
+}
+
 void AppController::render_status_block() {
 	char current_status[512];
 	uint8_t line_count = 0;
@@ -401,6 +456,8 @@ void AppController::render_status_block() {
 			"Sequence Length: %u\n"
 			"Octave Range: %u\n"
 			"Quantization: %s\n"
+			"Transpose: +%s\n"
+			"%s"
 			"Voltage: %.2f > %.2f\n"
 			"Timing: base=%luus current=%luus\n"
 			"Gate History: %s",
@@ -411,13 +468,17 @@ void AppController::render_status_block() {
 			static_cast<unsigned>(sequencer_engine_.sequence_length()),
 			static_cast<unsigned>(sequencer_engine_.range_octaves()),
 			sequencer_engine_.quantization_mode_name(),
+			sequencer_engine_.root_note_name(),
+			sequencer_engine_.root_edit_armed() ? "Transpose Edit: active (hold B, use MIDI or Pot 2)\n" : "",
 			sequencer_engine_.last_raw_voltage(),
 			sequencer_engine_.last_quantized_voltage(),
 			static_cast<unsigned long>(sequencer_engine_.base_interval_us()),
 			static_cast<unsigned long>(sequencer_engine_.current_interval_us()),
 			sequencer_engine_.gate_history()
 		);
-		line_count = static_cast<uint8_t>(10 + (transport_text[0] != '\0' ? 1 : 0));
+		line_count = static_cast<uint8_t>(
+			11 + (transport_text[0] != '\0' ? 1 : 0) + (sequencer_engine_.root_edit_armed() ? 1 : 0)
+		);
 	}
 
 	if (status_has_text_ && strcmp(current_status, status_text_) == 0) {
@@ -455,6 +516,9 @@ void AppController::set_mode(AppMode mode) {
 	}
 
 	cancel_pending_single_button_presses();
+	sequencer_button_b_waiting_second_tap_ = false;
+	sequencer_root_edit_hold_active_ = false;
+	sequencer_button_b_last_release_at_ = 0;
 	mode_ = mode;
 
 	if (mode_ == AppMode::kSequencer) {
