@@ -33,7 +33,6 @@ constexpr uint8_t POT_FUNCTION_ID_CV_CHANNEL = 2;
 constexpr uint8_t POT_FUNCTION_ID_MODE = 3;
 constexpr uint8_t POT_FUNCTION_PICKUP_HYSTERESIS = 1;
 constexpr uint8_t NUM_POTS = 3;
-constexpr uint32_t RUNTIME_SNAPSHOT_INTERVAL_MS = 500;
 
 enum State {
 	kDefault = 0,
@@ -69,7 +68,6 @@ private:
 	bool reset_leds_;
 	bool has_persisted_midi_channel_;
 	uint8_t persisted_midi_channel_;
-	absolute_time_t telemetry_last_log_time_;
 
 	void set_leds_from_mask(uint8_t mask);
 
@@ -82,11 +80,6 @@ private:
 	void update_cc_setting();
 	void load_settings();
 	void persist_midi_channel_if_needed();
-	void log_runtime_snapshot();
-
-	const char* state_to_string(State state) const;
-	const char* cv_channel_to_string(brain::io::AudioCvOutChannel cv_channel) const;
-	const char* mode_to_string(MidiToCV::Mode mode) const;
 };
 
 #endif

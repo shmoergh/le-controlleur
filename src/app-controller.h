@@ -11,6 +11,7 @@
 constexpr int64_t BUTTON_SHORT_PRESS_MAX_US = 400LL * 1000LL;
 constexpr int64_t BUTTON_LONG_PRESS_MIN_US = 1500LL * 1000LL;
 constexpr int64_t BUTTON_DUAL_PRESS_WINDOW_US = 120LL * 1000LL;
+constexpr int64_t STATUS_REFRESH_INTERVAL_US = 100LL * 1000LL;
 
 enum class AppMode {
 	kMidiToCv = 0,
@@ -39,6 +40,10 @@ private:
 	bool dual_button_action_handled_;
 	absolute_time_t first_button_pressed_at_;
 	absolute_time_t dual_button_started_at_;
+	absolute_time_t status_last_refresh_at_;
+	bool status_initialized_;
+	AppMode last_status_mode_;
+	uint8_t status_line_count_;
 
 	void on_button_a_press();
 	void on_button_a_release();
@@ -51,6 +56,7 @@ private:
 	void clear_dual_button_tracking();
 	void check_toggle_mode();
 	void check_handle_short_dual_button_on_release(absolute_time_t released_at);
+	void render_status_block(absolute_time_t now);
 	void set_mode(AppMode mode);
 };
 

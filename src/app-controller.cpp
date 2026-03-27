@@ -1,6 +1,6 @@
 #include "app-controller.h"
 
-#include "debug-log.h"
+#include <stdio.h>
 
 AppController::AppController() :
 	button_a_(GPIO_BRAIN_BUTTON_1),
@@ -16,7 +16,11 @@ AppController::AppController() :
 	dual_button_active_(false),
 	dual_button_action_handled_(false),
 	first_button_pressed_at_(0),
-	dual_button_started_at_(0) {
+	dual_button_started_at_(0),
+	status_last_refresh_at_(0),
+	status_initialized_(false),
+	last_status_mode_(AppMode::kMidiToCv),
+	status_line_count_(0) {
 	button_a_.init();
 	button_b_.init();
 
@@ -24,8 +28,6 @@ AppController::AppController() :
 	button_a_.set_on_release([this]() { on_button_a_release(); });
 	button_b_.set_on_press([this]() { on_button_b_press(); });
 	button_b_.set_on_release([this]() { on_button_b_release(); });
-
-	LOG_INFO("APP", "mode=MIDI2CV");
 }
 
 void AppController::update() {
@@ -44,6 +46,8 @@ void AppController::update() {
 			sequencer_engine_.update();
 			break;
 	}
+
+	render_status_block(get_absolute_time());
 }
 
 AppMode AppController::mode() const {
@@ -134,7 +138,6 @@ void AppController::start_dual_button_press(absolute_time_t started_at) {
 	dual_button_active_ = true;
 	dual_button_action_handled_ = false;
 	dual_button_started_at_ = started_at;
-	LOG_TRACE("CTRL", "dual-button-started");
 }
 
 void AppController::check_dispatch_pending_single_button_presses(absolute_time_t now) {
@@ -241,11 +244,10 @@ void AppController::check_toggle_mode() {
 
 	if (mode_ == AppMode::kMidiToCv) {
 		set_mode(AppMode::kSequencer);
-		LOG_INFO("CTRL", "mode-toggle long-press new_mode=SEQUENCER held_ms=%lld", held_ms);
 	} else {
 		set_mode(AppMode::kMidiToCv);
-		LOG_INFO("CTRL", "mode-toggle long-press new_mode=MIDI2CV held_ms=%lld", held_ms);
 	}
+	(void) held_ms;
 
 	dual_button_action_handled_ = true;
 }
@@ -263,12 +265,46 @@ void AppController::check_handle_short_dual_button_on_release(absolute_time_t re
 
 	if (mode_ == AppMode::kMidiToCv) {
 		midi_to_cv_engine_.panic();
-		LOG_INFO("PANIC", "short-dual-button panic triggered held_ms=%lld", held_ms);
-	} else {
-		LOG_TRACE("CTRL", "short-dual-button ignored in sequencer mode held_ms=%lld", held_ms);
 	}
+	(void) held_ms;
 
 	dual_button_action_handled_ = true;
+}
+
+void AppController::render_status_block(absolute_time_t now) {
+	if (status_last_refresh_at_ != 0 && mode_ == last_status_mode_) {
+		const int64_t elapsed_us = absolute_time_diff_us(status_last_refresh_at_, now);
+		if (elapsed_us < STATUS_REFRESH_INTERVAL_US) {
+			return;
+		}
+	}
+
+	if (status_initialized_) {
+		if (mode_ != last_status_mode_) {
+			printf("\n");
+			status_initialized_ = false;
+		} else {
+			printf("\033[%uF", status_line_count_);
+		}
+	}
+
+	printf("\033[J");
+	if (mode_ == AppMode::kMidiToCv) {
+		printf("MODE: MIDI 2 CV\n");
+		printf("Midi Channel: %u\n", static_cast<unsigned>(midi_to_cv_engine_.get_midi_channel()));
+		status_line_count_ = 2;
+	} else {
+		printf("MODE: SEQUENCER\n");
+		printf("Tempo: %u\n", static_cast<unsigned>(sequencer_engine_.tempo_bpm()));
+		printf("Randomness: %.2f\n", sequencer_engine_.randomness());
+		printf("Sequence length: %u\n", static_cast<unsigned>(sequencer_engine_.sequence_length()));
+		status_line_count_ = 4;
+	}
+
+	fflush(stdout);
+	status_initialized_ = true;
+	last_status_mode_ = mode_;
+	status_last_refresh_at_ = now;
 }
 
 void AppController::set_mode(AppMode mode) {
@@ -281,7 +317,6 @@ void AppController::set_mode(AppMode mode) {
 	}
 
 	cancel_pending_single_button_presses();
-	LOG_INFO("APP", "mode-exit=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 	mode_ = mode;
 
 	if (mode_ == AppMode::kSequencer) {
@@ -289,5 +324,4 @@ void AppController::set_mode(AppMode mode) {
 	}
 
 	midi_to_cv_engine_.play_startup_animation();
-	LOG_INFO("APP", "mode-enter=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 }

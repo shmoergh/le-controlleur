@@ -30,6 +30,9 @@ public:
 	void on_button_a_short_press();
 	void on_button_b_press();
 	void on_button_b_release();
+	uint16_t tempo_bpm() const;
+	float randomness() const;
+	uint8_t sequence_length() const;
 
 private:
 	static constexpr uint8_t POT_INDEX_BPM = 0;

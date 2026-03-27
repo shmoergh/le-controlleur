@@ -59,7 +59,6 @@ void SequencerEngine::on_mode_enter() {
 	shift_active_ = false;
 	update_bpm_from_pot(true);
 	update_randomness_or_length_from_pot3(true);
-	LOG_INFO("SEQ", "init length=%u bpm=%u randomness=%.2f", sequence_a_.length, bpm_, mutation_probability_);
 }
 
 void SequencerEngine::on_mode_exit() {
@@ -81,12 +80,10 @@ void SequencerEngine::on_button_a_short_press() {
 	if (playing_) {
 		last_tick_time_us_ = 0;
 		tick_counter_ = 0;
-		LOG_INFO("SEQ", "transport=PLAY");
 	} else {
 		gate_.set(false);
 		gate_active_ = false;
 		button_led_.off();
-		LOG_INFO("SEQ", "transport=PAUSE");
 	}
 }
 
@@ -96,7 +93,6 @@ void SequencerEngine::on_button_b_press() {
 	}
 
 	shift_active_ = true;
-	LOG_INFO("SEQ", "shift=ON");
 	update_randomness_or_length_from_pot3(true);
 }
 
@@ -106,7 +102,6 @@ void SequencerEngine::on_button_b_release() {
 	}
 
 	shift_active_ = false;
-	LOG_INFO("SEQ", "shift=OFF");
 	update_randomness_or_length_from_pot3(true);
 }
 
@@ -177,7 +172,6 @@ void SequencerEngine::update_bpm_from_pot(bool force_log) {
 
 	bpm_ = mapped_bpm;
 	tick_interval_us_ = 60000000u / (bpm_ * STEPS_PER_QUARTER_NOTE);
-	LOG_INFO("SEQ", "bpm=%u", bpm_);
 }
 
 void SequencerEngine::update_randomness_or_length_from_pot3(bool force_log) {
@@ -194,9 +188,6 @@ void SequencerEngine::update_randomness_or_length_from_pot3(bool force_log) {
 			sequence_a_.position = 0;
 		}
 
-		if (new_length != previous_length_ || force_log) {
-			LOG_INFO("SEQ", "length=%u source=pot3+shift", sequence_a_.length);
-		}
 		previous_length_ = new_length;
 		return;
 	}
@@ -208,7 +199,6 @@ void SequencerEngine::update_randomness_or_length_from_pot3(bool force_log) {
 	randomness_pot_value_ = pot_value;
 	mutation_probability_ = static_cast<float>(randomness_pot_value_) / 255.0f;
 	previous_randomness_pot_value_ = pot_value;
-	LOG_INFO("SEQ", "randomness=%.2f source=pot3", mutation_probability_);
 }
 
 void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
@@ -270,22 +260,6 @@ void SequencerEngine::tick(uint64_t now_us) {
 		button_led_.blink_duration(BUTTON_LED_BLINK_MS, BUTTON_LED_BLINK_INTERVAL_MS);
 	}
 
-	LOG_INFO_INLINE(
-		"SEQ",
-		"play=%u step=%u/%u beat=%u bpm=%u len=%u rand=%.2f shift=%u cvA=%.2f cvB=%.2f gate=%u",
-		playing_ ? 1u : 0u,
-		static_cast<unsigned>(step_index + 1),
-		static_cast<unsigned>(sequence_a_.length),
-		static_cast<unsigned>((tick_counter_ / STEPS_PER_QUARTER_NOTE) + 1),
-		static_cast<unsigned>(bpm_),
-		static_cast<unsigned>(sequence_a_.length),
-		mutation_probability_,
-		shift_active_ ? 1u : 0u,
-		step_a.voltage,
-		step_b.voltage,
-		step_a.gate ? 1u : 0u
-	);
-
 	tick_counter_++;
 	sequence_a_.position = static_cast<uint8_t>((step_index + 1) % sequence_a_.length);
 }
@@ -311,4 +285,16 @@ uint32_t SequencerEngine::next_random(uint32_t& state) {
 float SequencerEngine::random_unit(uint32_t& state) {
 	const uint32_t value = next_random(state) & 0x00FFFFFFu;
 	return static_cast<float>(value) / 16777215.0f;
+}
+
+uint16_t SequencerEngine::tempo_bpm() const {
+	return bpm_;
+}
+
+float SequencerEngine::randomness() const {
+	return mutation_probability_;
+}
+
+uint8_t SequencerEngine::sequence_length() const {
+	return sequence_a_.length;
 }

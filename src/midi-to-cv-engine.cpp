@@ -28,8 +28,6 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	pots_config.output_resolution = 8;
 	pots_.init(pots_config);
 
-	telemetry_last_log_time_ = 0;
-
 	// Load settings
 	mode_ = MidiToCV::Mode::kDefault;
 	load_settings();
@@ -140,8 +138,6 @@ void MidiToCVEngine::update() {
 			break;
 		}
 	}
-
-	log_runtime_snapshot();
 }
 
 State MidiToCVEngine::get_state() const {
@@ -241,14 +237,12 @@ void MidiToCVEngine::load_settings() {
 		midi_channel_ = persisted_channel;
 		has_persisted_midi_channel_ = true;
 		persisted_midi_channel_ = persisted_channel;
-		LOG_INFO("M2CV", "loaded midi_channel=%u source=flash", midi_channel_);
 	} else {
 		uint8_t pot_a_value = pots_.get(POT_MIDI_CHANNEL);
 		uint8_t binned_value = pot_a_value / 16;
 		midi_channel_ = binned_value + 1;
 		has_persisted_midi_channel_ = false;
 		persisted_midi_channel_ = 0;
-		LOG_INFO("M2CV", "loaded midi_channel=%u source=pot", midi_channel_);
 	}
 	set_midi_channel(midi_channel_);
 
@@ -273,70 +267,7 @@ void MidiToCVEngine::persist_midi_channel_if_needed() {
 	if (save_persisted_midi_channel(midi_channel_)) {
 		has_persisted_midi_channel_ = true;
 		persisted_midi_channel_ = midi_channel_;
-		LOG_INFO("M2CV", "saved midi_channel=%u to flash", midi_channel_);
 	} else {
 		LOG_ERROR("M2CV", "failed to save midi_channel=%u to flash", midi_channel_);
-	}
-}
-
-void MidiToCVEngine::log_runtime_snapshot() {
-	absolute_time_t now = get_absolute_time();
-
-	if (telemetry_last_log_time_ != 0) {
-		int64_t elapsed_ms = absolute_time_diff_us(telemetry_last_log_time_, now) / 1000;
-		if (elapsed_ms < static_cast<int64_t>(RUNTIME_SNAPSHOT_INTERVAL_MS)) {
-			return;
-		}
-	}
-
-	telemetry_last_log_time_ = now;
-
-	LOG_INFO(
-		"APP",
-		"snapshot state=%s midi_ch=%u cv=%s cc_mode=%s note_playing=%u tempo=n/a swing=n/a randomness=n/a length=n/a play=n/a",
-		state_to_string(state_),
-		midi_channel_,
-		cv_channel_to_string(cv_channel_),
-		mode_to_string(mode_),
-		is_note_playing() ? 1 : 0
-	);
-}
-
-const char* MidiToCVEngine::state_to_string(State state) const {
-	switch (state) {
-		case State::kDefault:
-			return "default";
-		case State::kSetMidiChannel:
-			return "set-midi-channel";
-		case State::kSetCVChannel:
-			return "set-cv-channel";
-		default:
-			return "unknown";
-	}
-}
-
-const char* MidiToCVEngine::cv_channel_to_string(brain::io::AudioCvOutChannel cv_channel) const {
-	switch (cv_channel) {
-		case brain::io::AudioCvOutChannel::kChannelA:
-			return "A";
-		case brain::io::AudioCvOutChannel::kChannelB:
-			return "B";
-		default:
-			return "unknown";
-	}
-}
-
-const char* MidiToCVEngine::mode_to_string(MidiToCV::Mode mode) const {
-	switch (mode) {
-		case MidiToCV::Mode::kDefault:
-			return "velocity";
-		case MidiToCV::Mode::kModWheel:
-			return "modwheel";
-		case MidiToCV::Mode::kUnison:
-			return "unison";
-		case MidiToCV::Mode::kDuo:
-			return "duo";
-		default:
-			return "unknown";
 	}
 }
