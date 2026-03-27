@@ -4,6 +4,44 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_NAME="brain-basic-midi2cv"
+DEBUG_LOG="ON"
+DEBUG_LEVEL="1"
+
+usage() {
+	echo "Usage: $0 [--no-debug|--debug|--trace]"
+	echo "  --no-debug  Disable firmware debug logs"
+	echo "  --debug     Enable INFO-level logs (default)"
+	echo "  --trace     Enable TRACE-level logs"
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--no-debug)
+			DEBUG_LOG="OFF"
+			DEBUG_LEVEL="0"
+			shift
+			;;
+		--debug)
+			DEBUG_LOG="ON"
+			DEBUG_LEVEL="1"
+			shift
+			;;
+		--trace)
+			DEBUG_LOG="ON"
+			DEBUG_LEVEL="2"
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			echo "Unknown option: $1" >&2
+			usage
+			exit 1
+			;;
+	esac
+done
 
 build_target() {
 	local board="$1"
@@ -14,7 +52,9 @@ build_target() {
 	echo "Configuring ${board} (${platform})..."
 	cmake -S "$ROOT_DIR" -B "$ROOT_DIR/$build_dir" \
 		-DPICO_BOARD="$board" \
-		-DPICO_PLATFORM="$platform"
+		-DPICO_PLATFORM="$platform" \
+		-DLE_CONTROLLEUR_DEBUG_LOG="$DEBUG_LOG" \
+		-DLE_CONTROLLEUR_DEBUG_LEVEL="$DEBUG_LEVEL"
 
 	echo "Building ${board} (${platform})..."
 	cmake --build "$ROOT_DIR/$build_dir"
@@ -28,6 +68,8 @@ build_target() {
 	cp "$uf2_path" "$ROOT_DIR/$output_file"
 	echo "Saved $output_file"
 }
+
+echo "Debug logging: ${DEBUG_LOG} (level ${DEBUG_LEVEL})"
 
 # Build order requested by user: Pico first, then Pico 2.
 build_target "pico" "rp2040" "build-pico" "brain-basic-midi2cv-pico.uf2"
