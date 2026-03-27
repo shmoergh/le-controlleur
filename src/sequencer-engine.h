@@ -6,6 +6,7 @@
 
 #include "brain-io/audio-cv-out.h"
 #include "brain-io/pulse.h"
+#include "brain-ui/button-led.h"
 #include "brain-ui/pots.h"
 
 struct Step {
@@ -32,12 +33,16 @@ private:
 	static constexpr uint8_t POT_INDEX_BPM = 0;
 	static constexpr uint16_t BPM_MIN = 30;
 	static constexpr uint16_t BPM_MAX = 240;
+	static constexpr uint8_t STEPS_PER_QUARTER_NOTE = 4;
 	static constexpr uint32_t GATE_PULSE_US = 20000;
+	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
+	static constexpr uint32_t BUTTON_LED_BLINK_INTERVAL_MS = 40;
 
 	Sequence sequence_;
 	brain::ui::Pots pots_;
 	brain::io::AudioCvOut dac_;
 	brain::io::Pulse gate_;
+	brain::ui::ButtonLed button_led_;
 
 	bool initialized_;
 	bool playing_;
@@ -46,6 +51,7 @@ private:
 	uint32_t tick_interval_us_;
 	uint64_t last_tick_time_us_;
 	uint64_t gate_off_time_us_;
+	uint32_t tick_counter_;
 
 	void init_sequence();
 	void init_io();

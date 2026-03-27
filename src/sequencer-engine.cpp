@@ -10,9 +10,10 @@ SequencerEngine::SequencerEngine() :
 	playing_(false),
 	gate_active_(false),
 	bpm_(120),
-	tick_interval_us_(500000),
+	tick_interval_us_(125000),
 	last_tick_time_us_(0),
-	gate_off_time_us_(0) {
+	gate_off_time_us_(0),
+	tick_counter_(0) {
 	init_sequence();
 	init_io();
 }
@@ -22,6 +23,7 @@ void SequencerEngine::update() {
 		return;
 	}
 
+	button_led_.update();
 	update_bpm_from_pot();
 
 	const uint64_t now_us = time_us_64();
@@ -67,10 +69,12 @@ void SequencerEngine::on_button_a_short_press() {
 
 	if (playing_) {
 		last_tick_time_us_ = 0;
+		tick_counter_ = 0;
 		LOG_INFO("SEQ", "transport=PLAY");
 	} else {
 		gate_.set(false);
 		gate_active_ = false;
+		button_led_.off();
 		LOG_INFO("SEQ", "transport=PAUSE");
 	}
 }
@@ -110,6 +114,8 @@ void SequencerEngine::init_io() {
 
 	gate_.begin();
 	gate_.set(false);
+	button_led_.init();
+	button_led_.off();
 
 	initialized_ = true;
 	update_bpm_from_pot(true);
@@ -125,7 +131,7 @@ void SequencerEngine::update_bpm_from_pot(bool force_log) {
 	}
 
 	bpm_ = mapped_bpm;
-	tick_interval_us_ = 60000000u / bpm_;
+	tick_interval_us_ = 60000000u / (bpm_ * STEPS_PER_QUARTER_NOTE);
 	LOG_INFO("SEQ", "bpm=%u", bpm_);
 }
 
@@ -147,16 +153,22 @@ void SequencerEngine::tick(uint64_t now_us) {
 		gate_active_ = false;
 	}
 
+	if ((tick_counter_ % STEPS_PER_QUARTER_NOTE) == 0) {
+		button_led_.blink_duration(BUTTON_LED_BLINK_MS, BUTTON_LED_BLINK_INTERVAL_MS);
+	}
+
 	LOG_INFO(
 		"CLK",
-		"tick step=%u/%u bpm=%u voltage=%.2f gate=%u",
+		"tick16 step=%u/%u bpm=%u voltage=%.2f gate=%u beat=%u",
 		static_cast<unsigned>(step_index + 1),
 		static_cast<unsigned>(sequence_.length),
 		static_cast<unsigned>(bpm_),
 		step.voltage,
-		step.gate ? 1u : 0u
+		step.gate ? 1u : 0u,
+		static_cast<unsigned>((tick_counter_ / STEPS_PER_QUARTER_NOTE) + 1)
 	);
 
+	tick_counter_++;
 	sequence_.position = static_cast<uint8_t>((step_index + 1) % sequence_.length);
 }
 
@@ -166,5 +178,7 @@ void SequencerEngine::reset_transport() {
 	last_tick_time_us_ = 0;
 	gate_off_time_us_ = 0;
 	gate_active_ = false;
+	tick_counter_ = 0;
 	gate_.set(false);
+	button_led_.off();
 }
