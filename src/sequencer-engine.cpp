@@ -1,5 +1,7 @@
 #include "sequencer-engine.h"
 
+#include <cmath>
+
 #include "pico/time.h"
 
 #include "brain-ui/pots.h"
@@ -15,10 +17,16 @@ SequencerEngine::SequencerEngine() :
 	gate_off_time_us_(0),
 	tick_counter_(0),
 	shift_active_(false),
+	range_octaves_(3),
+	previous_range_octaves_(255),
+	quantization_mode_(QuantizationMode::kChromatic),
+	previous_quantization_mode_index_(255),
 	randomness_pot_value_(0),
 	mutation_probability_(0.0f),
 	previous_randomness_pot_value_(255),
 	previous_length_(0),
+	last_raw_voltage_(0.0f),
+	last_quantized_voltage_(0.0f),
 	rng_state_a_(0x12345678u),
 	rng_state_b_(0x87654321u) {
 	init_sequence();
@@ -32,6 +40,7 @@ void SequencerEngine::update() {
 
 	button_led_.update();
 	update_bpm_from_pot();
+	update_range_or_quantization_from_pot2();
 	update_randomness_or_length_from_pot3();
 
 	const uint64_t now_us = time_us_64();
@@ -58,6 +67,7 @@ void SequencerEngine::on_mode_enter() {
 	reset_transport();
 	shift_active_ = false;
 	update_bpm_from_pot(true);
+	update_range_or_quantization_from_pot2(true);
 	update_randomness_or_length_from_pot3(true);
 }
 
@@ -93,6 +103,7 @@ void SequencerEngine::on_button_b_press() {
 	}
 
 	shift_active_ = true;
+	update_range_or_quantization_from_pot2(true);
 	update_randomness_or_length_from_pot3(true);
 }
 
@@ -102,6 +113,7 @@ void SequencerEngine::on_button_b_release() {
 	}
 
 	shift_active_ = false;
+	update_range_or_quantization_from_pot2(true);
 	update_randomness_or_length_from_pot3(true);
 }
 
@@ -159,6 +171,7 @@ void SequencerEngine::init_io() {
 
 	initialized_ = true;
 	update_bpm_from_pot(true);
+	update_range_or_quantization_from_pot2(true);
 }
 
 void SequencerEngine::update_bpm_from_pot(bool force_log) {
@@ -172,6 +185,33 @@ void SequencerEngine::update_bpm_from_pot(bool force_log) {
 
 	bpm_ = mapped_bpm;
 	tick_interval_us_ = 60000000u / (bpm_ * STEPS_PER_QUARTER_NOTE);
+}
+
+void SequencerEngine::update_range_or_quantization_from_pot2(bool force_log) {
+	const uint8_t pot_value = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+
+	if (shift_active_) {
+		const uint8_t mode_index = static_cast<uint8_t>((static_cast<uint32_t>(pot_value) * QUANTIZATION_MODE_COUNT) / 256u);
+		if (!force_log && mode_index == previous_quantization_mode_index_) {
+			return;
+		}
+
+		quantization_mode_ = static_cast<QuantizationMode>(mode_index);
+		previous_quantization_mode_index_ = mode_index;
+		return;
+	}
+
+	const uint8_t span = static_cast<uint8_t>(RANGE_OCTAVES_MAX - RANGE_OCTAVES_MIN + 1);
+	const uint8_t mapped_range = static_cast<uint8_t>(
+		RANGE_OCTAVES_MIN + ((static_cast<uint32_t>(pot_value) * span) / 256u)
+	);
+
+	if (!force_log && mapped_range == previous_range_octaves_) {
+		return;
+	}
+
+	range_octaves_ = mapped_range;
+	previous_range_octaves_ = mapped_range;
 }
 
 void SequencerEngine::update_randomness_or_length_from_pot3(bool force_log) {
@@ -243,9 +283,16 @@ void SequencerEngine::tick(uint64_t now_us) {
 	apply_mutation_for_step(step_index);
 	const Step& step_a = sequence_a_.steps[step_index];
 	const Step& step_b = sequence_b_steps_[step_index];
+	const float scaled_voltage_a = apply_pitch_range(step_a.voltage);
+	const float scaled_voltage_b = apply_pitch_range(step_b.voltage);
+	const float output_voltage_a = quantize_voltage(scaled_voltage_a);
+	const float output_voltage_b = quantize_voltage(scaled_voltage_b);
 
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, step_a.voltage);
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, step_b.voltage);
+	last_raw_voltage_ = scaled_voltage_a;
+	last_quantized_voltage_ = output_voltage_a;
+
+	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
+	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
 
 	if (step_a.gate) {
 		gate_.set(true);
@@ -275,6 +322,116 @@ void SequencerEngine::reset_transport() {
 	button_led_.off();
 }
 
+float SequencerEngine::apply_pitch_range(float source_voltage) const {
+	if (range_octaves_ == 0) {
+		return 0.0f;
+	}
+
+	float normalized = source_voltage / RANDOM_VOLTAGE_MAX;
+	if (normalized < 0.0f) {
+		normalized = 0.0f;
+	}
+	if (normalized > 1.0f) {
+		normalized = 1.0f;
+	}
+	return normalized * static_cast<float>(range_octaves_);
+}
+
+float SequencerEngine::quantize_voltage(float voltage) const {
+	if (quantization_mode_ == QuantizationMode::kUnquantized) {
+		return voltage;
+	}
+
+	const float max_voltage = static_cast<float>(range_octaves_);
+	if (voltage <= 0.0f) {
+		return 0.0f;
+	}
+	if (voltage >= max_voltage) {
+		return max_voltage;
+	}
+
+	static constexpr uint8_t CHROMATIC[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+	static constexpr uint8_t MAJOR[] = {0, 2, 4, 5, 7, 9, 11};
+	static constexpr uint8_t MINOR[] = {0, 2, 3, 5, 7, 8, 10};
+	static constexpr uint8_t PENTATONIC[] = {0, 2, 4, 7, 9};
+	static constexpr uint8_t EXTRA[] = {0, 1, 4, 5, 7, 8, 11};
+
+	const uint8_t* scale = CHROMATIC;
+	uint8_t scale_size = sizeof(CHROMATIC);
+
+	switch (quantization_mode_) {
+		case QuantizationMode::kChromatic:
+			scale = CHROMATIC;
+			scale_size = sizeof(CHROMATIC);
+			break;
+		case QuantizationMode::kMajor:
+			scale = MAJOR;
+			scale_size = sizeof(MAJOR);
+			break;
+		case QuantizationMode::kMinor:
+			scale = MINOR;
+			scale_size = sizeof(MINOR);
+			break;
+		case QuantizationMode::kPentatonic:
+			scale = PENTATONIC;
+			scale_size = sizeof(PENTATONIC);
+			break;
+		case QuantizationMode::kExtra:
+			scale = EXTRA;
+			scale_size = sizeof(EXTRA);
+			break;
+		case QuantizationMode::kUnquantized:
+		default:
+			return voltage;
+	}
+
+	const float semitone = voltage * 12.0f;
+	const int32_t rounded = static_cast<int32_t>(lroundf(semitone));
+	const int32_t octave_center = rounded / 12;
+
+	float best_distance = 1e9f;
+	int32_t best_semitone = rounded;
+
+	for (int32_t octave = octave_center - 1; octave <= octave_center + 1; ++octave) {
+		for (uint8_t i = 0; i < scale_size; ++i) {
+			const int32_t candidate = (octave * 12) + static_cast<int32_t>(scale[i]);
+			const float distance = fabsf(static_cast<float>(candidate) - semitone);
+			if (distance < best_distance) {
+				best_distance = distance;
+				best_semitone = candidate;
+			}
+		}
+	}
+
+	float quantized = static_cast<float>(best_semitone) / 12.0f;
+	if (quantized < 0.0f) {
+		quantized = 0.0f;
+	}
+	if (quantized > max_voltage) {
+		quantized = max_voltage;
+	}
+	return quantized;
+}
+
+const char* SequencerEngine::quantization_mode_to_string(QuantizationMode mode) {
+	switch (mode) {
+		case QuantizationMode::kUnquantized:
+			return "Unquantized";
+		case QuantizationMode::kChromatic:
+			return "Chromatic";
+		case QuantizationMode::kMajor:
+			return "Major";
+		case QuantizationMode::kMinor:
+			return "Minor";
+		case QuantizationMode::kPentatonic:
+			return "Pentatonic";
+		case QuantizationMode::kExtra:
+			return "Extra";
+		default:
+			return "Unknown";
+	}
+}
+
 uint32_t SequencerEngine::next_random(uint32_t& state) {
 	state ^= state << 13;
 	state ^= state >> 17;
@@ -297,4 +454,20 @@ float SequencerEngine::randomness() const {
 
 uint8_t SequencerEngine::sequence_length() const {
 	return sequence_a_.length;
+}
+
+uint8_t SequencerEngine::range_octaves() const {
+	return range_octaves_;
+}
+
+const char* SequencerEngine::quantization_mode_name() const {
+	return quantization_mode_to_string(quantization_mode_);
+}
+
+float SequencerEngine::last_raw_voltage() const {
+	return last_raw_voltage_;
+}
+
+float SequencerEngine::last_quantized_voltage() const {
+	return last_quantized_voltage_;
 }

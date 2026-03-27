@@ -283,10 +283,14 @@ void AppController::render_status_block() {
 		snprintf(
 			current_status,
 			sizeof(current_status),
-			"MODE: SEQUENCER | Tempo: %u | Randomness: %.2f | Sequence length: %u",
+			"MODE: SEQUENCER | T:%u R:%.2f L:%u O:%u Q:%s V:%.2f>%.2f",
 			static_cast<unsigned>(sequencer_engine_.tempo_bpm()),
 			sequencer_engine_.randomness(),
-			static_cast<unsigned>(sequencer_engine_.sequence_length())
+			static_cast<unsigned>(sequencer_engine_.sequence_length()),
+			static_cast<unsigned>(sequencer_engine_.range_octaves()),
+			sequencer_engine_.quantization_mode_name(),
+			sequencer_engine_.last_raw_voltage(),
+			sequencer_engine_.last_quantized_voltage()
 		);
 	}
 

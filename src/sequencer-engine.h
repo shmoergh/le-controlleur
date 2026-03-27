@@ -21,6 +21,15 @@ struct Sequence {
 	uint8_t position;
 };
 
+enum class QuantizationMode : uint8_t {
+	kUnquantized = 0,
+	kChromatic = 1,
+	kMajor = 2,
+	kMinor = 3,
+	kPentatonic = 4,
+	kExtra = 5
+};
+
 class SequencerEngine {
 public:
 	SequencerEngine();
@@ -33,12 +42,20 @@ public:
 	uint16_t tempo_bpm() const;
 	float randomness() const;
 	uint8_t sequence_length() const;
+	uint8_t range_octaves() const;
+	const char* quantization_mode_name() const;
+	float last_raw_voltage() const;
+	float last_quantized_voltage() const;
 
 private:
 	static constexpr uint8_t POT_INDEX_BPM = 0;
+	static constexpr uint8_t POT_INDEX_RANGE_OR_QUANTIZATION = 1;
 	static constexpr uint8_t POT_INDEX_RANDOMNESS_OR_LENGTH = 2;
 	static constexpr uint16_t BPM_MIN = 60;
 	static constexpr uint16_t BPM_MAX = 240;
+	static constexpr uint8_t RANGE_OCTAVES_MIN = 0;
+	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
+	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
 	static constexpr uint8_t STEPS_PER_QUARTER_NOTE = 4;
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
@@ -61,20 +78,30 @@ private:
 	uint64_t gate_off_time_us_;
 	uint32_t tick_counter_;
 	bool shift_active_;
+	uint8_t range_octaves_;
+	uint8_t previous_range_octaves_;
+	QuantizationMode quantization_mode_;
+	uint8_t previous_quantization_mode_index_;
 	uint8_t randomness_pot_value_;
 	float mutation_probability_;
 	uint8_t previous_randomness_pot_value_;
 	uint8_t previous_length_;
+	float last_raw_voltage_;
+	float last_quantized_voltage_;
 	uint32_t rng_state_a_;
 	uint32_t rng_state_b_;
 
 	void init_sequence();
 	void init_io();
 	void update_bpm_from_pot(bool force_log = false);
+	void update_range_or_quantization_from_pot2(bool force_log = false);
 	void update_randomness_or_length_from_pot3(bool force_log = false);
 	void apply_mutation_for_step(uint8_t step_index);
 	void tick(uint64_t now_us);
 	void reset_transport();
+	float apply_pitch_range(float source_voltage) const;
+	float quantize_voltage(float voltage) const;
+	static const char* quantization_mode_to_string(QuantizationMode mode);
 	static uint32_t next_random(uint32_t& state);
 	static float random_unit(uint32_t& state);
 };
