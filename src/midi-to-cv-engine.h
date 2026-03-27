@@ -67,6 +67,8 @@ private:
 	uint8_t key_pressed_;
 	uint8_t playhead_led_;
 	bool reset_leds_;
+	bool has_persisted_midi_channel_;
+	uint8_t persisted_midi_channel_;
 	absolute_time_t telemetry_last_log_time_;
 
 	void set_leds_from_mask(uint8_t mask);
@@ -79,6 +81,7 @@ private:
 	void update_cv_channel_setting();
 	void update_cc_setting();
 	void load_settings();
+	void persist_midi_channel_if_needed();
 	void log_runtime_snapshot();
 
 	const char* state_to_string(State state) const;

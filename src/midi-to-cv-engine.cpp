@@ -1,5 +1,6 @@
 #include "midi-to-cv-engine.h"
 #include "debug-log.h"
+#include "settings-storage.h"
 
 MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel) :
 	pots_(),
@@ -18,6 +19,8 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	reset_leds_ = false;
 	playhead_led_ = 0;
 	key_pressed_ = false;
+	has_persisted_midi_channel_ = false;
+	persisted_midi_channel_ = 0;
 
 	// Pots setup
 	brain::ui::PotsConfig pots_config = brain::ui::create_default_config();
@@ -42,6 +45,7 @@ void MidiToCVEngine::on_button_a_press() {
 void MidiToCVEngine::on_button_a_release() {
 	if (state_ == State::kSetMidiChannel) {
 		set_midi_channel(midi_channel_);
+		persist_midi_channel_if_needed();
 		reset_pot_function_context();
 	}
 	state_ = State::kDefault;
@@ -232,9 +236,20 @@ void MidiToCVEngine::update_cc_setting() {
 }
 
 void MidiToCVEngine::load_settings() {
-	uint8_t pot_a_value = pots_.get(POT_MIDI_CHANNEL);
-	uint8_t binned_value = pot_a_value / 16;
-	midi_channel_ = binned_value + 1;
+	uint8_t persisted_channel = 0;
+	if (load_persisted_midi_channel(persisted_channel)) {
+		midi_channel_ = persisted_channel;
+		has_persisted_midi_channel_ = true;
+		persisted_midi_channel_ = persisted_channel;
+		LOG_INFO("M2CV", "loaded midi_channel=%u source=flash", midi_channel_);
+	} else {
+		uint8_t pot_a_value = pots_.get(POT_MIDI_CHANNEL);
+		uint8_t binned_value = pot_a_value / 16;
+		midi_channel_ = binned_value + 1;
+		has_persisted_midi_channel_ = false;
+		persisted_midi_channel_ = 0;
+		LOG_INFO("M2CV", "loaded midi_channel=%u source=pot", midi_channel_);
+	}
 	set_midi_channel(midi_channel_);
 
 	uint8_t pot_b_value = pots_.get(POT_CV_CHANNEL);
@@ -248,6 +263,20 @@ void MidiToCVEngine::load_settings() {
 	uint8_t pot_c_value = pots_.get(POT_MODE);
 	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
 	set_mode(mode_);
+}
+
+void MidiToCVEngine::persist_midi_channel_if_needed() {
+	if (has_persisted_midi_channel_ && persisted_midi_channel_ == midi_channel_) {
+		return;
+	}
+
+	if (save_persisted_midi_channel(midi_channel_)) {
+		has_persisted_midi_channel_ = true;
+		persisted_midi_channel_ = midi_channel_;
+		LOG_INFO("M2CV", "saved midi_channel=%u to flash", midi_channel_);
+	} else {
+		LOG_ERROR("M2CV", "failed to save midi_channel=%u to flash", midi_channel_);
+	}
 }
 
 void MidiToCVEngine::log_runtime_snapshot() {
