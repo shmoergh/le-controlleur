@@ -250,5 +250,6 @@ void AppController::set_mode(AppMode mode) {
 	cancel_pending_single_button_presses();
 	LOG_INFO("APP", "mode-exit=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 	mode_ = mode;
+	midi_to_cv_engine_.play_startup_animation();
 	LOG_INFO("APP", "mode-enter=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 }

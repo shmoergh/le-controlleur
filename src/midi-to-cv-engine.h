@@ -47,6 +47,7 @@ public:
 	MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
 	void panic();
+	void play_startup_animation();
 	void on_button_a_press();
 	void on_button_a_release();
 	void on_button_b_press();

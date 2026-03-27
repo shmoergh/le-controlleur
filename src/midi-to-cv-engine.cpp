@@ -152,6 +152,10 @@ void MidiToCVEngine::panic() {
 	state_ = State::kDefault;
 }
 
+void MidiToCVEngine::play_startup_animation() {
+	leds_.startup_animation();
+}
+
 uint8_t MidiToCVEngine::get_midi_channel() const {
 	return midi_channel_;
 }
