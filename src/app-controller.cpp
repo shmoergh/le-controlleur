@@ -1,5 +1,6 @@
 #include "app-controller.h"
 
+#include <cstring>
 #include <stdio.h>
 
 AppController::AppController() :
@@ -17,10 +18,8 @@ AppController::AppController() :
 	dual_button_action_handled_(false),
 	first_button_pressed_at_(0),
 	dual_button_started_at_(0),
-	status_last_refresh_at_(0),
-	status_initialized_(false),
-	last_status_mode_(AppMode::kMidiToCv),
-	status_line_count_(0) {
+	status_has_text_(false),
+	status_text_{0} {
 	button_a_.init();
 	button_b_.init();
 
@@ -47,7 +46,7 @@ void AppController::update() {
 			break;
 	}
 
-	render_status_block(get_absolute_time());
+	render_status_block();
 }
 
 AppMode AppController::mode() const {
@@ -271,40 +270,35 @@ void AppController::check_handle_short_dual_button_on_release(absolute_time_t re
 	dual_button_action_handled_ = true;
 }
 
-void AppController::render_status_block(absolute_time_t now) {
-	if (status_last_refresh_at_ != 0 && mode_ == last_status_mode_) {
-		const int64_t elapsed_us = absolute_time_diff_us(status_last_refresh_at_, now);
-		if (elapsed_us < STATUS_REFRESH_INTERVAL_US) {
-			return;
-		}
-	}
-
-	if (status_initialized_) {
-		if (mode_ != last_status_mode_) {
-			printf("\n");
-			status_initialized_ = false;
-		} else {
-			printf("\033[%uF", status_line_count_);
-		}
-	}
-
-	printf("\033[J");
+void AppController::render_status_block() {
+	char current_status[160];
 	if (mode_ == AppMode::kMidiToCv) {
-		printf("MODE: MIDI 2 CV\n");
-		printf("Midi Channel: %u\n", static_cast<unsigned>(midi_to_cv_engine_.get_midi_channel()));
-		status_line_count_ = 2;
+		snprintf(
+			current_status,
+			sizeof(current_status),
+			"MODE: MIDI 2 CV | Midi Channel: %u",
+			static_cast<unsigned>(midi_to_cv_engine_.get_midi_channel())
+		);
 	} else {
-		printf("MODE: SEQUENCER\n");
-		printf("Tempo: %u\n", static_cast<unsigned>(sequencer_engine_.tempo_bpm()));
-		printf("Randomness: %.2f\n", sequencer_engine_.randomness());
-		printf("Sequence length: %u\n", static_cast<unsigned>(sequencer_engine_.sequence_length()));
-		status_line_count_ = 4;
+		snprintf(
+			current_status,
+			sizeof(current_status),
+			"MODE: SEQUENCER | Tempo: %u | Randomness: %.2f | Sequence length: %u",
+			static_cast<unsigned>(sequencer_engine_.tempo_bpm()),
+			sequencer_engine_.randomness(),
+			static_cast<unsigned>(sequencer_engine_.sequence_length())
+		);
 	}
 
+	if (status_has_text_ && strcmp(current_status, status_text_) == 0) {
+		return;
+	}
+
+	snprintf(status_text_, sizeof(status_text_), "%s", current_status);
+	status_has_text_ = true;
+
+	printf("\r\033[2K%s", status_text_);
 	fflush(stdout);
-	status_initialized_ = true;
-	last_status_mode_ = mode_;
-	status_last_refresh_at_ = now;
 }
 
 void AppController::set_mode(AppMode mode) {
