@@ -456,7 +456,7 @@ void AppController::render_status_block() {
 			"Sequence Length: %u\n"
 			"Octave Range: %u\n"
 			"Quantization: %s\n"
-			"Transpose: +%s\n"
+			"Transpose: +%uo +%s\n"
 			"%s"
 			"Voltage: %.2f > %.2f\n"
 			"Timing: base=%luus current=%luus\n"
@@ -468,8 +468,9 @@ void AppController::render_status_block() {
 			static_cast<unsigned>(sequencer_engine_.sequence_length()),
 			static_cast<unsigned>(sequencer_engine_.range_octaves()),
 			sequencer_engine_.quantization_mode_name(),
+			static_cast<unsigned>(sequencer_engine_.octave_transpose()),
 			sequencer_engine_.root_note_name(),
-			sequencer_engine_.root_edit_armed() ? "Transpose Edit: active (hold B, use MIDI or Pot 2)\n" : "",
+			sequencer_engine_.root_edit_armed() ? "Transpose Edit: active (hold B, Pot2=Oct, Pot3=Note, MIDI=Note)\n" : "",
 			sequencer_engine_.last_raw_voltage(),
 			sequencer_engine_.last_quantized_voltage(),
 			static_cast<unsigned long>(sequencer_engine_.base_interval_us()),

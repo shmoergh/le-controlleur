@@ -23,10 +23,13 @@ SequencerEngine::SequencerEngine() :
 	range_octaves_(3),
 	quantization_mode_(QuantizationMode::kChromatic),
 	root_note_(0),
+	octave_transpose_(2),
 	has_persisted_root_note_(false),
 	persisted_root_note_(0),
 	root_edit_armed_(false),
-	root_edit_pot_reference_raw_(0),
+	root_edit_octave_pot_reference_raw_(0),
+	root_edit_note_pot_reference_raw_(0),
+	root_edit_octave_overlay_until_us_(0),
 	randomness_pot_value_(0),
 	mutation_threshold_(0),
 	external_sync_enabled_(false),
@@ -68,7 +71,11 @@ void SequencerEngine::update() {
 	check_root_edit_pot_input();
 	update_pot_led_overlay(now_us);
 	if (root_edit_armed_) {
-		show_transpose_overlay();
+		if (now_us < root_edit_octave_overlay_until_us_) {
+			show_octave_transpose_overlay();
+		} else {
+			show_transpose_overlay();
+		}
 		pot_led_overlay_active_ = true;
 		pot_led_overlay_last_change_us_ = now_us;
 	}
@@ -191,7 +198,9 @@ void SequencerEngine::arm_root_edit() {
 	}
 
 	root_edit_armed_ = true;
-	root_edit_pot_reference_raw_ = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	root_edit_octave_pot_reference_raw_ = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	root_edit_note_pot_reference_raw_ = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
+	root_edit_octave_overlay_until_us_ = 0;
 }
 
 void SequencerEngine::release_root_edit() {
@@ -204,6 +213,7 @@ void SequencerEngine::release_root_edit() {
 	}
 
 	root_edit_armed_ = false;
+	root_edit_octave_overlay_until_us_ = 0;
 	persist_root_note_if_needed();
 }
 
@@ -212,16 +222,26 @@ void SequencerEngine::on_root_edit_midi_note(uint8_t note) {
 		return;
 	}
 
-	set_root_note_live(static_cast<uint8_t>(note % ROOT_NOTE_COUNT));
+	set_root_note_live(static_cast<uint8_t>(note % ROOT_NOTE_COUNT), false);
 }
 
-void SequencerEngine::on_root_edit_pot_value(uint8_t value) {
+void SequencerEngine::on_root_edit_note_pot_value(uint8_t value) {
 	if (!initialized_ || !root_edit_armed_) {
 		return;
 	}
 
 	const uint8_t root_note = static_cast<uint8_t>((static_cast<uint32_t>(value) * ROOT_NOTE_COUNT) / 256u);
 	set_root_note_live(root_note);
+}
+
+void SequencerEngine::on_root_edit_octave_pot_value(uint8_t value) {
+	if (!initialized_ || !root_edit_armed_) {
+		return;
+	}
+
+	// 6 hard bins: +0..+5 octaves (+0V .. +5V)
+	const uint8_t octave = static_cast<uint8_t>((static_cast<uint32_t>(value) * (OCTAVE_TRANSPOSE_MAX + 1u)) / 256u);
+	set_octave_transpose_live(octave);
 }
 
 void SequencerEngine::on_midi_clock_tick(uint64_t event_us) {
@@ -480,7 +500,8 @@ void SequencerEngine::init_io() {
 	last_pot_raw_values_[POT_INDEX_BPM] = pots_.get(POT_INDEX_BPM);
 	last_pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION] = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
 	last_pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH] = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
-	root_edit_pot_reference_raw_ = last_pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION];
+	root_edit_octave_pot_reference_raw_ = last_pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION];
+	root_edit_note_pot_reference_raw_ = last_pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH];
 
 	uint8_t persisted_root_note = 0;
 	if (load_persisted_root_note(persisted_root_note) && persisted_root_note < ROOT_NOTE_COUNT) {
@@ -591,8 +612,8 @@ void SequencerEngine::update_pot_mappings(bool force_apply) {
 	update_swing_from_pot1(force_apply);
 	if (!root_edit_armed_) {
 		update_range_or_quantization_from_pot2(force_apply);
+		update_randomness_or_length_from_pot3(force_apply);
 	}
-	update_randomness_or_length_from_pot3(force_apply);
 	pot_multi_function_.clear_changed_flags();
 }
 
@@ -700,18 +721,24 @@ void SequencerEngine::check_root_edit_pot_input() {
 		return;
 	}
 
-	const uint8_t raw = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
-	const uint8_t delta = (raw > root_edit_pot_reference_raw_)
-		? static_cast<uint8_t>(raw - root_edit_pot_reference_raw_)
-		: static_cast<uint8_t>(root_edit_pot_reference_raw_ - raw);
-	if (delta < ROOT_EDIT_POT_RAW_THRESHOLD) {
-		return;
+	const uint8_t octave_raw = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	const uint8_t octave_delta = (octave_raw > root_edit_octave_pot_reference_raw_)
+		? static_cast<uint8_t>(octave_raw - root_edit_octave_pot_reference_raw_)
+		: static_cast<uint8_t>(root_edit_octave_pot_reference_raw_ - octave_raw);
+	if (octave_delta >= ROOT_EDIT_POT_RAW_THRESHOLD) {
+		on_root_edit_octave_pot_value(octave_raw);
 	}
 
-	on_root_edit_pot_value(raw);
+	const uint8_t note_raw = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
+	const uint8_t note_delta = (note_raw > root_edit_note_pot_reference_raw_)
+		? static_cast<uint8_t>(note_raw - root_edit_note_pot_reference_raw_)
+		: static_cast<uint8_t>(root_edit_note_pot_reference_raw_ - note_raw);
+	if (note_delta >= ROOT_EDIT_POT_RAW_THRESHOLD) {
+		on_root_edit_note_pot_value(note_raw);
+	}
 }
 
-void SequencerEngine::set_root_note_live(uint8_t root_note) {
+void SequencerEngine::set_root_note_live(uint8_t root_note, bool update_reference) {
 	const uint8_t new_root = static_cast<uint8_t>(root_note % ROOT_NOTE_COUNT);
 	if (new_root == root_note_) {
 		return;
@@ -719,7 +746,21 @@ void SequencerEngine::set_root_note_live(uint8_t root_note) {
 
 	root_note_ = new_root;
 	refresh_output_after_root_change();
-	root_edit_pot_reference_raw_ = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	if (update_reference) {
+		root_edit_note_pot_reference_raw_ = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
+	}
+}
+
+void SequencerEngine::set_octave_transpose_live(uint8_t octave) {
+	const uint8_t new_octave = (octave > OCTAVE_TRANSPOSE_MAX) ? OCTAVE_TRANSPOSE_MAX : octave;
+	if (new_octave == octave_transpose_) {
+		return;
+	}
+
+	octave_transpose_ = new_octave;
+	refresh_output_after_root_change();
+	root_edit_octave_pot_reference_raw_ = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
+	root_edit_octave_overlay_until_us_ = time_us_64() + POT_LED_OVERLAY_HOLD_US;
 }
 
 void SequencerEngine::refresh_output_after_root_change() {
@@ -861,6 +902,11 @@ void SequencerEngine::update_pot_led_overlay(uint64_t now_us) {
 
 void SequencerEngine::show_active_pot_overlay(uint8_t pot_index) {
 	if (root_edit_armed_ && pot_index == POT_INDEX_RANGE_OR_QUANTIZATION) {
+		show_octave_transpose_overlay();
+		return;
+	}
+
+	if (root_edit_armed_ && pot_index == POT_INDEX_RANDOMNESS_OR_LENGTH) {
 		show_transpose_overlay();
 		return;
 	}
@@ -906,6 +952,17 @@ void SequencerEngine::show_transpose_overlay() {
 
 	if (dim_index >= 0 && dim_index < static_cast<int8_t>(brain::ui::NO_OF_LEDS)) {
 		leds_.set_brightness(static_cast<uint8_t>(dim_index), POT_LED_SOFT_BRIGHTNESS);
+	}
+}
+
+void SequencerEngine::show_octave_transpose_overlay() {
+	const uint8_t lit_count = static_cast<uint8_t>(octave_transpose_ + 1u);
+	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+		if (i < lit_count) {
+			leds_.set_brightness(i, 255u);
+		} else {
+			leds_.off(i);
+		}
 	}
 }
 
@@ -1162,10 +1219,8 @@ uint16_t SequencerEngine::apply_pitch_range(uint16_t source_q8) const {
 }
 
 uint16_t SequencerEngine::quantize_pitch(uint16_t pitch_q8) const {
-	const uint32_t max_q8 = static_cast<uint32_t>(range_octaves_) * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
-	if (pitch_q8 >= max_q8) {
-		return static_cast<uint16_t>(max_q8);
-	}
+	const uint32_t source_max_q8 = static_cast<uint32_t>(range_octaves_) * SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE;
+	const uint16_t source_pitch_q8 = (pitch_q8 > source_max_q8) ? static_cast<uint16_t>(source_max_q8) : pitch_q8;
 
 	static constexpr uint8_t CHROMATIC[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
 	static constexpr uint8_t MAJOR[] = {0, 2, 4, 5, 7, 9, 11};
@@ -1205,9 +1260,9 @@ uint16_t SequencerEngine::quantize_pitch(uint16_t pitch_q8) const {
 				break;
 		}
 
-	int32_t quantized_q8 = static_cast<int32_t>(pitch_q8);
+	int32_t quantized_q8 = static_cast<int32_t>(source_pitch_q8);
 	if (quantization_mode_ != QuantizationMode::kUnquantized) {
-		const int32_t rounded = static_cast<int32_t>((static_cast<uint32_t>(pitch_q8) + (PITCH_Q8_PER_SEMITONE / 2u))
+		const int32_t rounded = static_cast<int32_t>((static_cast<uint32_t>(source_pitch_q8) + (PITCH_Q8_PER_SEMITONE / 2u))
 			/ PITCH_Q8_PER_SEMITONE);
 		const int32_t octave_center = rounded / 12;
 
@@ -1218,7 +1273,7 @@ uint16_t SequencerEngine::quantize_pitch(uint16_t pitch_q8) const {
 			for (uint8_t i = 0; i < scale_size; ++i) {
 				const int32_t candidate = (octave * 12) + static_cast<int32_t>(scale[i]);
 				const int32_t candidate_q8 = candidate * static_cast<int32_t>(PITCH_Q8_PER_SEMITONE);
-				const int32_t diff = candidate_q8 - static_cast<int32_t>(pitch_q8);
+				const int32_t diff = candidate_q8 - static_cast<int32_t>(source_pitch_q8);
 				const int32_t distance = (diff < 0) ? -diff : diff;
 				if (distance < best_distance) {
 					best_distance = distance;
@@ -1230,13 +1285,17 @@ uint16_t SequencerEngine::quantize_pitch(uint16_t pitch_q8) const {
 		quantized_q8 = best_semitone * static_cast<int32_t>(PITCH_Q8_PER_SEMITONE);
 	}
 
-	const int32_t transpose_q8 = static_cast<int32_t>(root_note_) * static_cast<int32_t>(PITCH_Q8_PER_SEMITONE);
+	const int32_t transpose_q8 = (static_cast<int32_t>(octave_transpose_) * static_cast<int32_t>(SEMITONES_PER_OCTAVE)
+		+ static_cast<int32_t>(root_note_)) * static_cast<int32_t>(PITCH_Q8_PER_SEMITONE);
 	int32_t transposed_q8 = quantized_q8 + transpose_q8;
+	const int32_t output_max_q8 = static_cast<int32_t>(
+		brain::io::AudioCvOut::kMaxVoltage * static_cast<float>(SEMITONES_PER_OCTAVE * PITCH_Q8_PER_SEMITONE)
+	);
 	if (transposed_q8 < 0) {
 		transposed_q8 = 0;
 	}
-	if (transposed_q8 > static_cast<int32_t>(max_q8)) {
-		transposed_q8 = static_cast<int32_t>(max_q8);
+	if (transposed_q8 > output_max_q8) {
+		transposed_q8 = output_max_q8;
 	}
 	return static_cast<uint16_t>(transposed_q8);
 }
@@ -1321,6 +1380,10 @@ const char* SequencerEngine::quantization_mode_name() const {
 
 const char* SequencerEngine::root_note_name() const {
 	return root_note_to_string(root_note_);
+}
+
+uint8_t SequencerEngine::octave_transpose() const {
+	return octave_transpose_;
 }
 
 bool SequencerEngine::root_edit_armed() const {

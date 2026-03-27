@@ -50,7 +50,8 @@ public:
 	void arm_root_edit();
 	void release_root_edit();
 	void on_root_edit_midi_note(uint8_t note);
-	void on_root_edit_pot_value(uint8_t value);
+	void on_root_edit_note_pot_value(uint8_t value);
+	void on_root_edit_octave_pot_value(uint8_t value);
 	void on_midi_clock_tick(uint64_t event_us);
 	void on_midi_transport_start();
 	void on_midi_transport_continue();
@@ -66,6 +67,7 @@ public:
 	uint8_t range_octaves() const;
 	const char* quantization_mode_name() const;
 	const char* root_note_name() const;
+	uint8_t octave_transpose() const;
 	bool root_edit_armed() const;
 	float last_raw_voltage() const;
 	float last_quantized_voltage() const;
@@ -94,6 +96,7 @@ private:
 	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
 	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
 	static constexpr uint8_t ROOT_NOTE_COUNT = 12;
+	static constexpr uint8_t OCTAVE_TRANSPOSE_MAX = 5;
 	static constexpr uint8_t STEPS_PER_QUARTER_NOTE = 4;
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
@@ -141,10 +144,13 @@ private:
 	uint8_t range_octaves_;
 	QuantizationMode quantization_mode_;
 	uint8_t root_note_;
+	uint8_t octave_transpose_;
 	bool has_persisted_root_note_;
 	uint8_t persisted_root_note_;
 	bool root_edit_armed_;
-	uint8_t root_edit_pot_reference_raw_;
+	uint8_t root_edit_octave_pot_reference_raw_;
+	uint8_t root_edit_note_pot_reference_raw_;
+	uint64_t root_edit_octave_overlay_until_us_;
 	uint8_t randomness_pot_value_;
 	uint8_t mutation_threshold_;
 	bool external_sync_enabled_;
@@ -180,7 +186,8 @@ private:
 	void update_range_or_quantization_from_pot2(bool force_apply = false);
 	void update_randomness_or_length_from_pot3(bool force_apply = false);
 	void check_root_edit_pot_input();
-	void set_root_note_live(uint8_t root_note);
+	void set_root_note_live(uint8_t root_note, bool update_reference = true);
+	void set_octave_transpose_live(uint8_t octave);
 	void refresh_output_after_root_change();
 	void persist_root_note_if_needed();
 	uint8_t map_sequence_length_with_soft_snap(uint8_t pot_value) const;
@@ -190,6 +197,7 @@ private:
 	void update_pot_led_overlay(uint64_t now_us);
 	void show_active_pot_overlay(uint8_t pot_index);
 	void show_transpose_overlay();
+	void show_octave_transpose_overlay();
 	uint8_t active_pot_percent_255(uint8_t pot_index) const;
 	uint8_t active_pot_led_mask(uint8_t pot_index) const;
 	uint8_t percent_to_led_mask(uint8_t percent_255) const;
