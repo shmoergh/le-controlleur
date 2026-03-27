@@ -2,8 +2,6 @@
 #include "debug-log.h"
 
 MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel) :
-	button_a_(GPIO_BRAIN_BUTTON_1),
-	button_b_(GPIO_BRAIN_BUTTON_2),
 	pots_(),
 	leds_(true)
 {
@@ -13,28 +11,6 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	midi_channel_ = midi_channel;
 	cv_channel_ = cv_channel;
 	state_ = State::kDefault;
-
-	button_a_.init();
-	button_b_.init();
-
-	// Button A handlers
-	button_a_.set_on_press([this]() {
-		button_a_on_press();
-	});
-	button_a_.set_on_release([this]() {
-		button_a_on_release();
-	});
-
-	// Button B handlers
-	button_b_.set_on_press([this]() {
-		button_b_on_press();
-	});
-	button_b_.set_on_release([this]() {
-		button_b_on_release();
-	});
-
-	button_a_pressed_ = false;
-	button_b_pressed_ = false;
 
 	// Init leds
 	leds_.init();
@@ -57,13 +33,13 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	init_pot_functions();
 }
 
-void MidiToCVEngine::button_a_on_press() {
-	if (state_ == State::kDefault && state_ != State::kSetMidiChannel) {
+void MidiToCVEngine::on_button_a_press() {
+	if (state_ == State::kDefault) {
 		state_ = State::kSetMidiChannel;
 	}
 }
 
-void MidiToCVEngine::button_a_on_release() {
+void MidiToCVEngine::on_button_a_release() {
 	if (state_ == State::kSetMidiChannel) {
 		set_midi_channel(midi_channel_);
 		reset_pot_function_context();
@@ -71,13 +47,13 @@ void MidiToCVEngine::button_a_on_release() {
 	state_ = State::kDefault;
 }
 
-void MidiToCVEngine::button_b_on_press() {
-	if (state_ == State::kDefault && state_ != State::kSetCVChannel) {
+void MidiToCVEngine::on_button_b_press() {
+	if (state_ == State::kDefault) {
 		state_ = State::kSetCVChannel;
 	}
 }
 
-void MidiToCVEngine::button_b_on_release() {
+void MidiToCVEngine::on_button_b_release() {
 	if (state_ == State::kSetCVChannel) {
 		set_pitch_channel(cv_channel_);
 		MidiToCV::set_mode(mode_);
@@ -87,9 +63,6 @@ void MidiToCVEngine::button_b_on_release() {
 }
 
 void MidiToCVEngine::update() {
-	button_a_.update();
-	button_b_.update();
-
 	switch (state_) {
 		// Read pot X and set MIDI channel accordingly
 		case State::kSetMidiChannel: {

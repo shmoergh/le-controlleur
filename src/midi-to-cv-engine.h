@@ -6,14 +6,12 @@
 
 #include "brain-common/brain-gpio-setup.h"
 #include "brain-utils/midi-to-cv.h"
-#include "brain-ui/button.h"
 #include "brain-ui/leds.h"
 #include "brain-ui/pot-multi-function.h"
 #include "brain-ui/pots.h"
 #include "brain-utils/helpers.h"
 
 using brain::utils::MidiToCV;
-using brain::ui::Button;
 using brain::ui::Leds;
 using brain::ui::PotMultiFunction;
 using brain::ui::PotMode;
@@ -49,14 +47,14 @@ public:
 	MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
 	void panic();
+	void on_button_a_press();
+	void on_button_a_release();
+	void on_button_b_press();
+	void on_button_b_release();
 	State get_state() const;
 	uint8_t get_midi_channel() const;
 
 private:
-	Button button_a_;
-	Button button_b_;
-	bool button_a_pressed_;
-	bool button_b_pressed_;
 	Pots pots_;
 	PotMultiFunction pot_multi_function_;
 	Leds leds_;
@@ -71,12 +69,6 @@ private:
 	absolute_time_t telemetry_last_log_time_;
 
 	void set_leds_from_mask(uint8_t mask);
-
-	void button_a_on_press();
-	void button_a_on_release();
-
-	void button_b_on_press();
-	void button_b_on_release();
 
 	void init_pot_functions();
 	void set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function);

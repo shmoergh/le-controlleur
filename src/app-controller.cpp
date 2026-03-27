@@ -9,6 +9,10 @@ AppController::AppController() :
 	midi_to_cv_engine_(brain::io::AudioCvOutChannel::kChannelB, 1),
 	button_a_pressed_(false),
 	button_b_pressed_(false),
+	button_a_pending_single_press_(false),
+	button_b_pending_single_press_(false),
+	button_a_single_press_dispatched_(false),
+	button_b_single_press_dispatched_(false),
 	dual_button_active_(false),
 	dual_button_action_handled_(false),
 	first_button_pressed_at_(0),
@@ -30,24 +34,12 @@ void AppController::update() {
 
 	maybe_toggle_mode();
 
-	if (dual_button_active_) {
-		return;
-	}
-
-	// Keep a short window to detect potential dual-button presses before
-	// forwarding single-button presses to the MIDI2CV engine.
-	if (mode_ == AppMode::kMidiToCv && (button_a_pressed_ ^ button_b_pressed_) && first_button_pressed_at_ != 0) {
-		absolute_time_t now = get_absolute_time();
-		int64_t elapsed_ms = absolute_time_diff_us(first_button_pressed_at_, now) / 1000;
-		if (elapsed_ms < static_cast<int64_t>(BUTTON_DUAL_PRESS_WINDOW_MS)) {
-			return;
-		}
-	}
-
 	switch (mode_) {
-		case AppMode::kMidiToCv:
+		case AppMode::kMidiToCv: {
+			maybe_dispatch_pending_single_button_presses(get_absolute_time());
 			midi_to_cv_engine_.update();
 			break;
+		}
 		case AppMode::kSequencer:
 			// Sequencer routing will be implemented in the next phase.
 			break;
@@ -64,6 +56,7 @@ void AppController::on_button_a_press() {
 
 	if (!button_b_pressed_) {
 		first_button_pressed_at_ = now;
+		button_a_pending_single_press_ = true;
 		return;
 	}
 
@@ -71,14 +64,19 @@ void AppController::on_button_a_press() {
 		first_button_pressed_at_ = now;
 	}
 
-	int64_t delta_ms = absolute_time_diff_us(first_button_pressed_at_, now) / 1000;
-	if (delta_ms <= static_cast<int64_t>(BUTTON_DUAL_PRESS_WINDOW_MS)) {
+	int64_t delta_us = absolute_time_diff_us(first_button_pressed_at_, now);
+	if (delta_us <= BUTTON_DUAL_PRESS_WINDOW_US) {
 		start_dual_button_press(now);
+		cancel_pending_single_button_presses();
+		return;
 	}
+
+	button_a_pending_single_press_ = true;
 }
 
 void AppController::on_button_a_release() {
 	button_a_pressed_ = false;
+	maybe_dispatch_single_button_release(true);
 
 	if (!button_a_pressed_ && !button_b_pressed_) {
 		maybe_handle_short_dual_button_on_release(get_absolute_time());
@@ -92,6 +90,7 @@ void AppController::on_button_b_press() {
 
 	if (!button_a_pressed_) {
 		first_button_pressed_at_ = now;
+		button_b_pending_single_press_ = true;
 		return;
 	}
 
@@ -99,14 +98,19 @@ void AppController::on_button_b_press() {
 		first_button_pressed_at_ = now;
 	}
 
-	int64_t delta_ms = absolute_time_diff_us(first_button_pressed_at_, now) / 1000;
-	if (delta_ms <= static_cast<int64_t>(BUTTON_DUAL_PRESS_WINDOW_MS)) {
+	int64_t delta_us = absolute_time_diff_us(first_button_pressed_at_, now);
+	if (delta_us <= BUTTON_DUAL_PRESS_WINDOW_US) {
 		start_dual_button_press(now);
+		cancel_pending_single_button_presses();
+		return;
 	}
+
+	button_b_pending_single_press_ = true;
 }
 
 void AppController::on_button_b_release() {
 	button_b_pressed_ = false;
+	maybe_dispatch_single_button_release(false);
 
 	if (!button_a_pressed_ && !button_b_pressed_) {
 		maybe_handle_short_dual_button_on_release(get_absolute_time());
@@ -119,10 +123,71 @@ void AppController::start_dual_button_press(absolute_time_t started_at) {
 		return;
 	}
 
+	cancel_pending_single_button_presses();
 	dual_button_active_ = true;
 	dual_button_action_handled_ = false;
 	dual_button_started_at_ = started_at;
 	LOG_TRACE("CTRL", "dual-button-started");
+}
+
+void AppController::maybe_dispatch_pending_single_button_presses(absolute_time_t now) {
+	if (dual_button_active_ || first_button_pressed_at_ == 0) {
+		return;
+	}
+
+	if (absolute_time_diff_us(first_button_pressed_at_, now) < BUTTON_DUAL_PRESS_WINDOW_US) {
+		return;
+	}
+
+	if (button_a_pending_single_press_ && !button_a_single_press_dispatched_) {
+		midi_to_cv_engine_.on_button_a_press();
+		button_a_single_press_dispatched_ = true;
+		button_a_pending_single_press_ = false;
+	}
+
+	if (button_b_pending_single_press_ && !button_b_single_press_dispatched_) {
+		midi_to_cv_engine_.on_button_b_press();
+		button_b_single_press_dispatched_ = true;
+		button_b_pending_single_press_ = false;
+	}
+}
+
+void AppController::maybe_dispatch_single_button_release(bool is_button_a) {
+	if (mode_ != AppMode::kMidiToCv || dual_button_active_) {
+		return;
+	}
+
+	if (is_button_a) {
+		if (button_a_pending_single_press_ && !button_a_single_press_dispatched_) {
+			midi_to_cv_engine_.on_button_a_press();
+			button_a_single_press_dispatched_ = true;
+			button_a_pending_single_press_ = false;
+		}
+
+		if (button_a_single_press_dispatched_) {
+			midi_to_cv_engine_.on_button_a_release();
+			button_a_single_press_dispatched_ = false;
+		}
+		return;
+	}
+
+	if (button_b_pending_single_press_ && !button_b_single_press_dispatched_) {
+		midi_to_cv_engine_.on_button_b_press();
+		button_b_single_press_dispatched_ = true;
+		button_b_pending_single_press_ = false;
+	}
+
+	if (button_b_single_press_dispatched_) {
+		midi_to_cv_engine_.on_button_b_release();
+		button_b_single_press_dispatched_ = false;
+	}
+}
+
+void AppController::cancel_pending_single_button_presses() {
+	button_a_pending_single_press_ = false;
+	button_b_pending_single_press_ = false;
+	button_a_single_press_dispatched_ = false;
+	button_b_single_press_dispatched_ = false;
 }
 
 void AppController::clear_dual_button_tracking() {
@@ -130,6 +195,7 @@ void AppController::clear_dual_button_tracking() {
 	dual_button_action_handled_ = false;
 	first_button_pressed_at_ = 0;
 	dual_button_started_at_ = 0;
+	cancel_pending_single_button_presses();
 }
 
 void AppController::maybe_toggle_mode() {
@@ -138,10 +204,11 @@ void AppController::maybe_toggle_mode() {
 	}
 
 	absolute_time_t now = get_absolute_time();
-	int64_t held_ms = absolute_time_diff_us(dual_button_started_at_, now) / 1000;
-	if (held_ms < static_cast<int64_t>(BUTTON_LONG_PRESS_MIN_MS)) {
+	int64_t held_us = absolute_time_diff_us(dual_button_started_at_, now);
+	if (held_us < BUTTON_LONG_PRESS_MIN_US) {
 		return;
 	}
+	int64_t held_ms = held_us / 1000;
 
 	if (mode_ == AppMode::kMidiToCv) {
 		set_mode(AppMode::kSequencer);
@@ -159,10 +226,11 @@ void AppController::maybe_handle_short_dual_button_on_release(absolute_time_t re
 		return;
 	}
 
-	int64_t held_ms = absolute_time_diff_us(dual_button_started_at_, released_at) / 1000;
-	if (held_ms > static_cast<int64_t>(BUTTON_SHORT_PRESS_MAX_MS)) {
+	int64_t held_us = absolute_time_diff_us(dual_button_started_at_, released_at);
+	if (held_us > BUTTON_SHORT_PRESS_MAX_US) {
 		return;
 	}
+	int64_t held_ms = held_us / 1000;
 
 	if (mode_ == AppMode::kMidiToCv) {
 		midi_to_cv_engine_.panic();
@@ -179,6 +247,7 @@ void AppController::set_mode(AppMode mode) {
 		return;
 	}
 
+	cancel_pending_single_button_presses();
 	LOG_INFO("APP", "mode-exit=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
 	mode_ = mode;
 	LOG_INFO("APP", "mode-enter=%s", mode_ == AppMode::kMidiToCv ? "MIDI2CV" : "SEQUENCER");
