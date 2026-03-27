@@ -27,8 +27,14 @@
 
 #if LE_CONTROLLEUR_DEBUG_LOG && (LE_CONTROLLEUR_DEBUG_LEVEL >= 1)
 #define LOG_INFO(tag, fmt, ...) printf("[%s][INFO] " fmt "\n", tag, ##__VA_ARGS__)
+#define LOG_INFO_INLINE(tag, fmt, ...) \
+	do { \
+		printf("\r[%s][INFO] " fmt "                ", tag, ##__VA_ARGS__); \
+		fflush(stdout); \
+	} while (0)
 #else
 #define LOG_INFO(tag, fmt, ...) ((void)0)
+#define LOG_INFO_INLINE(tag, fmt, ...) ((void)0)
 #endif
 
 #if LE_CONTROLLEUR_DEBUG_LOG && (LE_CONTROLLEUR_DEBUG_LEVEL >= 2)

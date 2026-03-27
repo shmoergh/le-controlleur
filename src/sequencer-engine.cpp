@@ -238,21 +238,12 @@ void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
 		mutated_gate = (step_a.gate != old_gate);
 	}
 
-	LOG_INFO(
-		"MUT",
-		"step=%u p=%.2f A:%.2f->%.2f mA=%u B:%.2f->%.2f mB=%u gate:%u->%u mG=%u",
-		static_cast<unsigned>(step_index + 1),
-		mutation_probability_,
-		old_voltage_a,
-		step_a.voltage,
-		mutated_a ? 1u : 0u,
-		old_voltage_b,
-		step_b.voltage,
-		mutated_b ? 1u : 0u,
-		old_gate ? 1u : 0u,
-		step_a.gate ? 1u : 0u,
-		mutated_gate ? 1u : 0u
-	);
+	(void) old_voltage_a;
+	(void) old_voltage_b;
+	(void) old_gate;
+	(void) mutated_a;
+	(void) mutated_b;
+	(void) mutated_gate;
 }
 
 void SequencerEngine::tick(uint64_t now_us) {
@@ -279,16 +270,20 @@ void SequencerEngine::tick(uint64_t now_us) {
 		button_led_.blink_duration(BUTTON_LED_BLINK_MS, BUTTON_LED_BLINK_INTERVAL_MS);
 	}
 
-	LOG_INFO(
-		"CLK",
-		"tick16 step=%u/%u bpm=%u cvA=%.2f cvB=%.2f gate=%u beat=%u",
+	LOG_INFO_INLINE(
+		"SEQ",
+		"play=%u step=%u/%u beat=%u bpm=%u len=%u rand=%.2f shift=%u cvA=%.2f cvB=%.2f gate=%u",
+		playing_ ? 1u : 0u,
 		static_cast<unsigned>(step_index + 1),
 		static_cast<unsigned>(sequence_a_.length),
+		static_cast<unsigned>((tick_counter_ / STEPS_PER_QUARTER_NOTE) + 1),
 		static_cast<unsigned>(bpm_),
+		static_cast<unsigned>(sequence_a_.length),
+		mutation_probability_,
+		shift_active_ ? 1u : 0u,
 		step_a.voltage,
 		step_b.voltage,
-		step_a.gate ? 1u : 0u,
-		static_cast<unsigned>((tick_counter_ / STEPS_PER_QUARTER_NOTE) + 1)
+		step_a.gate ? 1u : 0u
 	);
 
 	tick_counter_++;

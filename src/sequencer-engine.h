@@ -34,7 +34,7 @@ public:
 private:
 	static constexpr uint8_t POT_INDEX_BPM = 0;
 	static constexpr uint8_t POT_INDEX_RANDOMNESS_OR_LENGTH = 2;
-	static constexpr uint16_t BPM_MIN = 30;
+	static constexpr uint16_t BPM_MIN = 60;
 	static constexpr uint16_t BPM_MAX = 240;
 	static constexpr uint8_t STEPS_PER_QUARTER_NOTE = 4;
 	static constexpr uint32_t GATE_PULSE_US = 20000;
