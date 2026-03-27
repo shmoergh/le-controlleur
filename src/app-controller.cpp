@@ -67,6 +67,14 @@ void AppController::on_button_a_press() {
 	absolute_time_t now = get_absolute_time();
 
 	if (!button_b_pressed_) {
+		if (mode_ == AppMode::kSequencer) {
+			sequencer_engine_.on_button_a_short_press();
+			button_a_single_press_dispatched_ = true;
+			button_a_pending_single_press_ = false;
+			first_button_pressed_at_ = now;
+			return;
+		}
+
 		first_button_pressed_at_ = now;
 		button_a_pending_single_press_ = true;
 		return;
@@ -138,6 +146,13 @@ void AppController::start_dual_button_press(absolute_time_t started_at) {
 		return;
 	}
 
+	if (mode_ == AppMode::kSequencer && button_a_single_press_dispatched_) {
+		// Button A now toggles play/pause on press; if this evolves into a dual press,
+		// revert the optimistic single-press action so dual-button behavior stays clean.
+		sequencer_engine_.on_button_a_short_press();
+		button_a_single_press_dispatched_ = false;
+	}
+
 	if (mode_ == AppMode::kSequencer && button_b_pressed_) {
 		sequencer_engine_.on_button_b_release();
 	}
@@ -183,11 +198,6 @@ void AppController::check_dispatch_single_button_release(bool is_button_a) {
 			return;
 		}
 
-		const absolute_time_t now = get_absolute_time();
-		const int64_t held_us = (first_button_pressed_at_ == 0) ? 0 : absolute_time_diff_us(first_button_pressed_at_, now);
-		if (held_us <= BUTTON_SHORT_PRESS_MAX_US) {
-			sequencer_engine_.on_button_a_short_press();
-		}
 		button_a_pending_single_press_ = false;
 		button_a_single_press_dispatched_ = false;
 		return;
