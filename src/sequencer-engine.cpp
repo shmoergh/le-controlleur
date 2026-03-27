@@ -23,6 +23,9 @@ SequencerEngine::SequencerEngine() :
 	quantization_mode_(QuantizationMode::kChromatic),
 	randomness_pot_value_(0),
 	mutation_threshold_(0),
+	external_sync_enabled_(false),
+	last_pulse_in_high_(false),
+	last_external_tick_us_(0),
 	last_raw_voltage_(0.0f),
 	last_quantized_voltage_(0.0f),
 	pot_led_overlay_active_(false),
@@ -47,6 +50,7 @@ void SequencerEngine::update() {
 
 	const uint64_t now_us = time_us_64();
 	update_pot_led_overlay(now_us);
+	const bool pulse_in_high = gate_.read();
 
 	if (gate_active_ && now_us >= gate_off_time_us_) {
 		gate_.set(false);
@@ -54,8 +58,22 @@ void SequencerEngine::update() {
 	}
 
 	if (!playing_) {
+		last_pulse_in_high_ = pulse_in_high;
 		return;
 	}
+
+	if (external_sync_enabled_) {
+		if (pulse_in_high && !last_pulse_in_high_) {
+			if (last_external_tick_us_ != 0 && now_us > last_external_tick_us_) {
+				current_step_interval_us_ = static_cast<uint32_t>(now_us - last_external_tick_us_);
+			}
+			last_external_tick_us_ = now_us;
+			tick(now_us);
+		}
+		last_pulse_in_high_ = pulse_in_high;
+		return;
+	}
+	last_pulse_in_high_ = pulse_in_high;
 
 	if (next_tick_due_us_ == 0) {
 		next_tick_due_us_ = now_us;
@@ -287,12 +305,27 @@ void SequencerEngine::update_bpm_from_pot(bool force_apply) {
 		return;
 	}
 	const uint8_t pot_value = pot_multi_function_.get_value(POT_FUNCTION_ID_BPM);
+	const bool was_external_sync_enabled = external_sync_enabled_;
+	external_sync_enabled_ = (pot_value == 0u);
+	if (external_sync_enabled_) {
+		if (!was_external_sync_enabled) {
+			// Entering external sync: stop internal scheduler state once.
+			next_tick_due_us_ = 0;
+			last_external_tick_us_ = 0;
+		}
+		return;
+	}
+
 	const uint16_t span = static_cast<uint16_t>(BPM_MAX - BPM_MIN);
 	const uint16_t mapped_bpm = static_cast<uint16_t>(BPM_MIN + ((static_cast<uint32_t>(pot_value) * span) / 255));
 
 	bpm_ = mapped_bpm;
 	tick_interval_us_ = 60000000u / (bpm_ * STEPS_PER_QUARTER_NOTE);
 	current_step_interval_us_ = compute_next_step_interval_us();
+	if (was_external_sync_enabled) {
+		// Leaving external sync: restart internal scheduler from "now".
+		next_tick_due_us_ = 0;
+	}
 }
 
 void SequencerEngine::update_swing_from_pot1(bool force_apply) {
@@ -564,6 +597,8 @@ void SequencerEngine::reset_transport() {
 	last_pot_raw_values_[POT_INDEX_BPM] = pots_.get(POT_INDEX_BPM);
 	last_pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION] = pots_.get(POT_INDEX_RANGE_OR_QUANTIZATION);
 	last_pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH] = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
+	last_pulse_in_high_ = gate_.read();
+	last_external_tick_us_ = 0;
 	reset_gate_history();
 	button_led_.off();
 }
@@ -709,6 +744,10 @@ float SequencerEngine::pitch_q8_to_voltage(uint16_t pitch_q8) {
 
 uint16_t SequencerEngine::tempo_bpm() const {
 	return bpm_;
+}
+
+bool SequencerEngine::external_sync_enabled() const {
+	return external_sync_enabled_;
 }
 
 float SequencerEngine::swing() const {

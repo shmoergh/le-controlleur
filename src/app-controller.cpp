@@ -303,11 +303,18 @@ void AppController::render_status_block() {
 		);
 		line_count = 2;
 	} else {
+		char tempo_text[32];
+		if (sequencer_engine_.external_sync_enabled()) {
+			snprintf(tempo_text, sizeof(tempo_text), "%s", "EXT (Pulse In)");
+		} else {
+			snprintf(tempo_text, sizeof(tempo_text), "%u", static_cast<unsigned>(sequencer_engine_.tempo_bpm()));
+		}
+
 		snprintf(
 			current_status,
 			sizeof(current_status),
 			"MODE: SEQUENCER\n"
-			"Tempo: %u\n"
+			"Tempo: %s\n"
 			"Swing: %.1f%%\n"
 			"Randomness: %.2f\n"
 			"Sequence Length: %u\n"
@@ -316,7 +323,7 @@ void AppController::render_status_block() {
 			"Voltage: %.2f > %.2f\n"
 			"Timing: base=%luus current=%luus\n"
 			"Gate History: %s",
-			static_cast<unsigned>(sequencer_engine_.tempo_bpm()),
+			tempo_text,
 			sequencer_engine_.swing() * 100.0f,
 			sequencer_engine_.randomness(),
 			static_cast<unsigned>(sequencer_engine_.sequence_length()),

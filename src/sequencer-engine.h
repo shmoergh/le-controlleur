@@ -42,6 +42,7 @@ public:
 	void on_button_b_press();
 	void on_button_b_release();
 	uint16_t tempo_bpm() const;
+	bool external_sync_enabled() const;
 	float swing() const;
 	float randomness() const;
 	uint8_t sequence_length() const;
@@ -107,6 +108,9 @@ private:
 	QuantizationMode quantization_mode_;
 	uint8_t randomness_pot_value_;
 	uint8_t mutation_threshold_;
+	bool external_sync_enabled_;
+	bool last_pulse_in_high_;
+	uint64_t last_external_tick_us_;
 	float last_raw_voltage_;
 	float last_quantized_voltage_;
 	bool pot_led_overlay_active_;
