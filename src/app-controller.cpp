@@ -15,7 +15,7 @@ AppController::AppController() :
 	button_b_(GPIO_BRAIN_BUTTON_2),
 	mode_(AppMode::kMidiToCv),
 	midi_to_cv_engine_(brain::io::AudioCvOutChannel::kChannelB, 1),
-	sequencer_midi_parser_(1, true),
+	sequencer_midi_parser_(1, false),
 	sequencer_midi_parser_initialized_(false),
 	button_a_pressed_(false),
 	button_b_pressed_(false),
@@ -43,6 +43,7 @@ AppController::AppController() :
 	button_b_.set_on_release([this]() { on_button_b_release(); });
 	sequencer_midi_parser_.set_realtime_callback(&AppController::on_sequencer_midi_realtime);
 	sequencer_midi_parser_.set_note_on_callback(&AppController::on_sequencer_midi_note_on);
+	sequencer_midi_parser_.set_channel(midi_to_cv_engine_.get_midi_channel());
 
 	uint8_t persisted_mode = static_cast<uint8_t>(AppMode::kMidiToCv);
 	if (load_persisted_app_mode(persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
@@ -413,8 +414,10 @@ void AppController::on_sequencer_midi_note_on(uint8_t note, uint8_t velocity, ui
 }
 
 void AppController::handle_sequencer_midi_note_on(uint8_t note, uint8_t velocity, uint8_t channel) {
-	(void) channel;
 	if (mode_ != AppMode::kSequencer || velocity == 0u) {
+		return;
+	}
+	if (channel != midi_to_cv_engine_.get_midi_channel()) {
 		return;
 	}
 	sequencer_engine_.on_root_edit_midi_note(note);
@@ -537,6 +540,7 @@ void AppController::set_mode(AppMode mode) {
 	mode_ = mode;
 
 	if (mode_ == AppMode::kSequencer) {
+		sequencer_midi_parser_.set_channel(midi_to_cv_engine_.get_midi_channel());
 		ensure_sequencer_midi_parser_initialized();
 		sequencer_midi_parser_.reset();
 		sequencer_engine_.on_mode_enter();
