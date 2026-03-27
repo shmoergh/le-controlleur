@@ -78,6 +78,8 @@ private:
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
 	static constexpr uint32_t BUTTON_LED_BLINK_INTERVAL_MS = 40;
+	static constexpr uint8_t SWING_MAX_NUMERATOR = 3;   // 30%
+	static constexpr uint8_t SWING_MAX_DENOMINATOR = 10;
 	static constexpr uint8_t POT_LED_SOFT_BRIGHTNESS = 48;
 	static constexpr uint16_t PITCH_Q8_PER_SEMITONE = 256;
 	static constexpr uint16_t SEMITONES_PER_OCTAVE = 12;

@@ -685,9 +685,11 @@ uint32_t SequencerEngine::compute_next_step_interval_us() const {
 		return base;
 	}
 
-	// swing_delta = base * (pot / (255 * 4)); max swing is 25% at full pot.
+	// swing_delta = base * ((pot/255) * SWING_MAX), with SWING_MAX = 30%.
+	const uint32_t swing_divisor = 255u * SWING_MAX_DENOMINATOR;
+	const uint32_t swing_round = swing_divisor / 2u;
 	const uint32_t swing_delta = static_cast<uint32_t>(
-		(static_cast<uint64_t>(base) * swing_pot_value_ + 510u) / 1020u
+		(static_cast<uint64_t>(base) * swing_pot_value_ * SWING_MAX_NUMERATOR + swing_round) / swing_divisor
 	);
 	if ((tick_counter_ & 1u) == 0u) {
 		return (base > swing_delta) ? (base - swing_delta) : 1u;
@@ -827,7 +829,8 @@ bool SequencerEngine::external_sync_enabled() const {
 }
 
 float SequencerEngine::swing() const {
-	return static_cast<float>(swing_pot_value_) / 1020.0f;
+	return static_cast<float>(static_cast<uint16_t>(swing_pot_value_) * SWING_MAX_NUMERATOR)
+		/ static_cast<float>(255u * SWING_MAX_DENOMINATOR);
 }
 
 float SequencerEngine::randomness() const {
