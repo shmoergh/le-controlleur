@@ -132,7 +132,7 @@ void SequencerEngine::on_button_b_press() {
 	}
 
 	shift_active_ = true;
-	update_pot_mappings(true);
+	update_pot_mappings();
 }
 
 void SequencerEngine::on_button_b_release() {
@@ -141,7 +141,7 @@ void SequencerEngine::on_button_b_release() {
 	}
 
 	shift_active_ = false;
-	update_pot_mappings(true);
+	update_pot_mappings();
 }
 
 void SequencerEngine::init_sequence() {
