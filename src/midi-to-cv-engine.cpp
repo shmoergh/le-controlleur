@@ -49,8 +49,6 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	pots_config.output_resolution = 8;
 	pots_.init(pots_config);
 
-	// Panic
-	panic_timer_start_ = 0;
 	telemetry_last_log_time_ = 0;
 
 	// Load settings
@@ -63,20 +61,12 @@ void MidiToCVEngine::button_a_on_press() {
 	if (state_ == State::kDefault && state_ != State::kSetMidiChannel) {
 		state_ = State::kSetMidiChannel;
 	}
-
-	// If button B is pressed and button A is pressed then panic mode starts
-	if (state_ == State::kSetCVChannel) {
-		state_ = State::kPanicStarted;
-	}
 }
 
 void MidiToCVEngine::button_a_on_release() {
 	if (state_ == State::kSetMidiChannel) {
 		set_midi_channel(midi_channel_);
 		reset_pot_function_context();
-	}
-	if (state_ == State::kPanicStarted) {
-		reset_panic();
 	}
 	state_ = State::kDefault;
 }
@@ -85,10 +75,6 @@ void MidiToCVEngine::button_b_on_press() {
 	if (state_ == State::kDefault && state_ != State::kSetCVChannel) {
 		state_ = State::kSetCVChannel;
 	}
-
-	if (state_ == State::kSetMidiChannel) {
-		state_ = State::kPanicStarted;
-	}
 }
 
 void MidiToCVEngine::button_b_on_release() {
@@ -96,9 +82,6 @@ void MidiToCVEngine::button_b_on_release() {
 		set_pitch_channel(cv_channel_);
 		MidiToCV::set_mode(mode_);
 		reset_pot_function_context();
-	}
-	if (state_ == State::kPanicStarted) {
-		reset_panic();
 	}
 	state_ = State::kDefault;
 }
@@ -159,23 +142,6 @@ void MidiToCVEngine::update() {
 			break;
 		}
 
-		// Panic
-		case State::kPanicStarted: {
-			if (panic_timer_start_ == 0) {
-				panic_timer_start_ = get_absolute_time();
-				leds_.on_all();
-			}
-
-			absolute_time_t now = get_absolute_time();
-			if (absolute_time_diff_us(panic_timer_start_, now) / 1000 >= PANIC_HOLD_THRESHOLD_MS) {
-				MidiToCV::set_gate(false);
-				MidiToCV::reset_note_stack();
-				state_ = State::kDefault;
-				reset_panic();
-			}
-			break;
-		}
-
 		default: {
 			MidiToCV::update();
 			if (is_note_playing()) {
@@ -205,14 +171,16 @@ State MidiToCVEngine::get_state() const {
 	return state_;
 }
 
-uint8_t MidiToCVEngine::get_midi_channel() const {
-	return midi_channel_;
-}
-
-void MidiToCVEngine::reset_panic() {
-	panic_timer_start_ = 0;
+void MidiToCVEngine::panic() {
+	MidiToCV::set_gate(false);
+	MidiToCV::reset_note_stack();
 	reset_pot_function_context();
 	leds_.off_all();
+	state_ = State::kDefault;
+}
+
+uint8_t MidiToCVEngine::get_midi_channel() const {
+	return midi_channel_;
 }
 
 void MidiToCVEngine::init_pot_functions() {
@@ -336,8 +304,6 @@ const char* MidiToCVEngine::state_to_string(State state) const {
 			return "set-midi-channel";
 		case State::kSetCVChannel:
 			return "set-cv-channel";
-		case State::kPanicStarted:
-			return "panic-started";
 		default:
 			return "unknown";
 	}

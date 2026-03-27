@@ -35,14 +35,12 @@ constexpr uint8_t POT_FUNCTION_ID_CV_CHANNEL = 2;
 constexpr uint8_t POT_FUNCTION_ID_MODE = 3;
 constexpr uint8_t POT_FUNCTION_PICKUP_HYSTERESIS = 1;
 constexpr uint8_t NUM_POTS = 3;
-constexpr uint32_t PANIC_HOLD_THRESHOLD_MS = 2000;
 constexpr uint32_t RUNTIME_SNAPSHOT_INTERVAL_MS = 500;
 
 enum State {
 	kDefault = 0,
 	kSetMidiChannel = 1,
-	kSetCVChannel = 2,
-	kPanicStarted = 3
+	kSetCVChannel = 2
 };
 
 class MidiToCVEngine : public MidiToCV
@@ -50,6 +48,7 @@ class MidiToCVEngine : public MidiToCV
 public:
 	MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
+	void panic();
 	State get_state() const;
 	uint8_t get_midi_channel() const;
 
@@ -69,7 +68,6 @@ private:
 	uint8_t key_pressed_;
 	uint8_t playhead_led_;
 	bool reset_leds_;
-	absolute_time_t panic_timer_start_;
 	absolute_time_t telemetry_last_log_time_;
 
 	void set_leds_from_mask(uint8_t mask);
@@ -80,7 +78,6 @@ private:
 	void button_b_on_press();
 	void button_b_on_release();
 
-	void reset_panic();
 	void init_pot_functions();
 	void set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function);
 	void reset_pot_function_context();
