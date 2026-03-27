@@ -7,6 +7,7 @@
 #include "brain-io/audio-cv-out.h"
 #include "brain-io/pulse.h"
 #include "brain-ui/button-led.h"
+#include "brain-ui/leds.h"
 #include "brain-ui/pot-multi-function.h"
 #include "brain-ui/pots.h"
 
@@ -50,6 +51,7 @@ public:
 	float last_quantized_voltage() const;
 	uint32_t base_interval_us() const;
 	uint32_t current_interval_us() const;
+	const char* gate_history() const;
 
 private:
 	static constexpr uint8_t POT_INDEX_BPM = 0;
@@ -82,6 +84,7 @@ private:
 	brain::ui::PotMultiFunction pot_multi_function_;
 	brain::io::AudioCvOut dac_;
 	brain::io::Pulse gate_;
+	brain::ui::Leds leds_;
 	brain::ui::ButtonLed button_led_;
 
 	bool initialized_;
@@ -102,6 +105,8 @@ private:
 	float mutation_probability_;
 	float last_raw_voltage_;
 	float last_quantized_voltage_;
+	std::array<uint8_t, brain::ui::NO_OF_LEDS> gate_history_fifo_;
+	char gate_history_text_[brain::ui::NO_OF_LEDS + 1];
 	uint32_t rng_state_a_;
 	uint32_t rng_state_b_;
 
@@ -115,6 +120,10 @@ private:
 	void update_range_or_quantization_from_pot2(bool force_apply = false);
 	void update_randomness_or_length_from_pot3(bool force_apply = false);
 	void apply_mutation_for_step(uint8_t step_index);
+	void reset_gate_history();
+	void push_gate_history(bool gate_high);
+	void refresh_gate_history_view();
+	uint8_t gate_history_mask() const;
 	void tick(uint64_t now_us);
 	void reset_transport();
 	float apply_pitch_range(float source_voltage) const;

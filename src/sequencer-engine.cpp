@@ -8,6 +8,7 @@
 #include "debug-log.h"
 
 SequencerEngine::SequencerEngine() :
+	leds_(true),
 	initialized_(false),
 	playing_(false),
 	gate_active_(false),
@@ -26,6 +27,8 @@ SequencerEngine::SequencerEngine() :
 	mutation_probability_(0.0f),
 	last_raw_voltage_(0.0f),
 	last_quantized_voltage_(0.0f),
+	gate_history_fifo_{0, 0, 0, 0, 0, 0},
+	gate_history_text_{'0', '0', '0', '0', '0', '0', '\0'},
 	rng_state_a_(0x12345678u),
 	rng_state_b_(0x87654321u) {
 	init_sequence();
@@ -37,6 +40,7 @@ void SequencerEngine::update() {
 		return;
 	}
 
+	leds_.update();
 	button_led_.update();
 	update_pot_mappings();
 
@@ -169,8 +173,11 @@ void SequencerEngine::init_io() {
 
 	gate_.begin();
 	gate_.set(false);
+	leds_.init();
+	leds_.off_all();
 	button_led_.init();
 	button_led_.off();
+	reset_gate_history();
 
 	init_pot_functions();
 	initialized_ = true;
@@ -370,6 +377,38 @@ void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
 	(void) mutated_gate;
 }
 
+void SequencerEngine::reset_gate_history() {
+	gate_history_fifo_.fill(0);
+	refresh_gate_history_view();
+	leds_.off_all();
+}
+
+void SequencerEngine::push_gate_history(bool gate_high) {
+	for (uint8_t i = 0; i < (brain::ui::NO_OF_LEDS - 1); ++i) {
+		gate_history_fifo_[i] = gate_history_fifo_[i + 1];
+	}
+	gate_history_fifo_[brain::ui::NO_OF_LEDS - 1] = gate_high ? 1 : 0;
+	refresh_gate_history_view();
+	leds_.set_from_mask(gate_history_mask());
+}
+
+void SequencerEngine::refresh_gate_history_view() {
+	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+		gate_history_text_[i] = gate_history_fifo_[i] ? '1' : '0';
+	}
+	gate_history_text_[brain::ui::NO_OF_LEDS] = '\0';
+}
+
+uint8_t SequencerEngine::gate_history_mask() const {
+	uint8_t mask = 0;
+	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+		if (gate_history_fifo_[i] != 0) {
+			mask |= static_cast<uint8_t>(1u << i);
+		}
+	}
+	return mask;
+}
+
 void SequencerEngine::tick(uint64_t now_us) {
 	const uint8_t step_index = sequence_a_.position;
 	apply_mutation_for_step(step_index);
@@ -392,6 +431,7 @@ void SequencerEngine::tick(uint64_t now_us) {
 		gate_.set(false);
 		gate_active_ = false;
 	}
+	push_gate_history(step_a.gate);
 
 	if ((tick_counter_ % STEPS_PER_QUARTER_NOTE) == 0) {
 		button_led_.blink_duration(BUTTON_LED_BLINK_MS, BUTTON_LED_BLINK_INTERVAL_MS);
@@ -410,6 +450,7 @@ void SequencerEngine::reset_transport() {
 	tick_counter_ = 0;
 	current_step_interval_us_ = tick_interval_us_;
 	gate_.set(false);
+	reset_gate_history();
 	button_led_.off();
 }
 
@@ -586,4 +627,8 @@ uint32_t SequencerEngine::base_interval_us() const {
 
 uint32_t SequencerEngine::current_interval_us() const {
 	return current_step_interval_us_;
+}
+
+const char* SequencerEngine::gate_history() const {
+	return gate_history_text_;
 }

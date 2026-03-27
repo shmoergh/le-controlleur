@@ -296,7 +296,8 @@ void AppController::render_status_block() {
 			"Octave Range: %u\n"
 			"Quantization: %s\n"
 			"Voltage: %.2f > %.2f\n"
-			"Timing: base=%luus current=%luus",
+			"Timing: base=%luus current=%luus\n"
+			"Gate History: %s",
 			static_cast<unsigned>(sequencer_engine_.tempo_bpm()),
 			sequencer_engine_.swing() * 100.0f,
 			sequencer_engine_.randomness(),
@@ -306,9 +307,10 @@ void AppController::render_status_block() {
 			sequencer_engine_.last_raw_voltage(),
 			sequencer_engine_.last_quantized_voltage(),
 			static_cast<unsigned long>(sequencer_engine_.base_interval_us()),
-			static_cast<unsigned long>(sequencer_engine_.current_interval_us())
+			static_cast<unsigned long>(sequencer_engine_.current_interval_us()),
+			sequencer_engine_.gate_history()
 		);
-		line_count = 9;
+		line_count = 10;
 	}
 
 	if (status_has_text_ && strcmp(current_status, status_text_) == 0) {
