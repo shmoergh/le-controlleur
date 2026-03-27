@@ -368,7 +368,16 @@ void SequencerEngine::update_randomness_or_length_from_pot3(bool force_apply) {
 	const uint8_t pot_value = pot_multi_function_.get_value(function_id);
 
 	if (shift_active_) {
+		const uint8_t previous_length = sequence_a_.length;
 		const uint8_t new_length = static_cast<uint8_t>(1 + ((static_cast<uint32_t>(pot_value) * 63u) / 255u));
+		if (new_length > previous_length) {
+			for (uint8_t i = previous_length; i < new_length; ++i) {
+				sequence_a_.steps[i].pitch_q8 = static_cast<uint16_t>(next_random(rng_state_a_) % (RANDOM_MAX_Q8 + 1u));
+				sequence_a_.steps[i].gate = random_u8(rng_state_a_) >= 102u;
+				sequence_b_steps_[i].pitch_q8 = static_cast<uint16_t>(next_random(rng_state_b_) % (RANDOM_MAX_Q8 + 1u));
+				sequence_b_steps_[i].gate = random_u8(rng_state_b_) >= 102u;
+			}
+		}
 		sequence_a_.length = new_length;
 		if (sequence_a_.position >= sequence_a_.length) {
 			sequence_a_.position = 0;
