@@ -89,6 +89,9 @@ void AppController::on_button_b_press() {
 	absolute_time_t now = get_absolute_time();
 
 	if (!button_a_pressed_) {
+		if (mode_ == AppMode::kSequencer) {
+			sequencer_engine_.on_button_b_press();
+		}
 		first_button_pressed_at_ = now;
 		button_b_pending_single_press_ = true;
 		return;
@@ -121,6 +124,10 @@ void AppController::on_button_b_release() {
 void AppController::start_dual_button_press(absolute_time_t started_at) {
 	if (dual_button_active_) {
 		return;
+	}
+
+	if (mode_ == AppMode::kSequencer && button_b_pressed_) {
+		sequencer_engine_.on_button_b_release();
 	}
 
 	cancel_pending_single_button_presses();
@@ -159,6 +166,7 @@ void AppController::check_dispatch_single_button_release(bool is_button_a) {
 
 	if (mode_ == AppMode::kSequencer) {
 		if (!is_button_a) {
+			sequencer_engine_.on_button_b_release();
 			button_b_pending_single_press_ = false;
 			button_b_single_press_dispatched_ = false;
 			return;

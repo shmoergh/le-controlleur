@@ -13,7 +13,14 @@ SequencerEngine::SequencerEngine() :
 	tick_interval_us_(125000),
 	last_tick_time_us_(0),
 	gate_off_time_us_(0),
-	tick_counter_(0) {
+	tick_counter_(0),
+	shift_active_(false),
+	randomness_pot_value_(0),
+	mutation_probability_(0.0f),
+	previous_randomness_pot_value_(255),
+	previous_length_(0),
+	rng_state_a_(0x12345678u),
+	rng_state_b_(0x87654321u) {
 	init_sequence();
 	init_io();
 }
@@ -25,6 +32,7 @@ void SequencerEngine::update() {
 
 	button_led_.update();
 	update_bpm_from_pot();
+	update_randomness_or_length_from_pot3();
 
 	const uint64_t now_us = time_us_64();
 
@@ -48,8 +56,10 @@ void SequencerEngine::on_mode_enter() {
 	}
 
 	reset_transport();
+	shift_active_ = false;
 	update_bpm_from_pot(true);
-	LOG_INFO("SEQ", "init length=%u bpm=%u", sequence_.length, bpm_);
+	update_randomness_or_length_from_pot3(true);
+	LOG_INFO("SEQ", "init length=%u bpm=%u randomness=%.2f", sequence_a_.length, bpm_, mutation_probability_);
 }
 
 void SequencerEngine::on_mode_exit() {
@@ -58,6 +68,7 @@ void SequencerEngine::on_mode_exit() {
 	}
 
 	reset_transport();
+	shift_active_ = false;
 }
 
 void SequencerEngine::on_button_a_short_press() {
@@ -79,20 +90,50 @@ void SequencerEngine::on_button_a_short_press() {
 	}
 }
 
+void SequencerEngine::on_button_b_press() {
+	if (!initialized_ || shift_active_) {
+		return;
+	}
+
+	shift_active_ = true;
+	LOG_INFO("SEQ", "shift=ON");
+	update_randomness_or_length_from_pot3(true);
+}
+
+void SequencerEngine::on_button_b_release() {
+	if (!initialized_ || !shift_active_) {
+		return;
+	}
+
+	shift_active_ = false;
+	LOG_INFO("SEQ", "shift=OFF");
+	update_randomness_or_length_from_pot3(true);
+}
+
 void SequencerEngine::init_sequence() {
-	sequence_.steps.fill({0.0f, false});
-	sequence_.length = 8;
-	sequence_.position = 0;
+	sequence_a_.steps.fill({0.0f, false});
+	sequence_b_steps_.fill({0.0f, false});
+	sequence_a_.length = 8;
+	sequence_a_.position = 0;
 
 	// Deterministic bring-up pattern.
-	sequence_.steps[0] = {0.0f, true};
-	sequence_.steps[1] = {0.5f, false};
-	sequence_.steps[2] = {1.0f, true};
-	sequence_.steps[3] = {1.5f, false};
-	sequence_.steps[4] = {2.0f, true};
-	sequence_.steps[5] = {2.5f, false};
-	sequence_.steps[6] = {3.0f, true};
-	sequence_.steps[7] = {3.5f, true};
+	sequence_a_.steps[0] = {0.0f, true};
+	sequence_a_.steps[1] = {0.5f, false};
+	sequence_a_.steps[2] = {1.0f, true};
+	sequence_a_.steps[3] = {1.5f, false};
+	sequence_a_.steps[4] = {2.0f, true};
+	sequence_a_.steps[5] = {2.5f, false};
+	sequence_a_.steps[6] = {3.0f, true};
+	sequence_a_.steps[7] = {3.5f, true};
+
+	sequence_b_steps_[0] = {0.25f, true};
+	sequence_b_steps_[1] = {0.75f, true};
+	sequence_b_steps_[2] = {1.25f, false};
+	sequence_b_steps_[3] = {1.75f, true};
+	sequence_b_steps_[4] = {2.25f, false};
+	sequence_b_steps_[5] = {2.75f, true};
+	sequence_b_steps_[6] = {3.25f, false};
+	sequence_b_steps_[7] = {3.75f, true};
 }
 
 void SequencerEngine::init_io() {
@@ -135,16 +176,93 @@ void SequencerEngine::update_bpm_from_pot(bool force_log) {
 	LOG_INFO("SEQ", "bpm=%u", bpm_);
 }
 
+void SequencerEngine::update_randomness_or_length_from_pot3(bool force_log) {
+	const uint8_t pot_value = pots_.get(POT_INDEX_RANDOMNESS_OR_LENGTH);
+
+	if (shift_active_) {
+		const uint8_t new_length = static_cast<uint8_t>(1 + ((static_cast<uint32_t>(pot_value) * 63u) / 255u));
+		if (!force_log && new_length == sequence_a_.length) {
+			return;
+		}
+
+		sequence_a_.length = new_length;
+		if (sequence_a_.position >= sequence_a_.length) {
+			sequence_a_.position = 0;
+		}
+
+		if (new_length != previous_length_ || force_log) {
+			LOG_INFO("SEQ", "length=%u source=pot3+shift", sequence_a_.length);
+		}
+		previous_length_ = new_length;
+		return;
+	}
+
+	if (!force_log && pot_value == previous_randomness_pot_value_) {
+		return;
+	}
+
+	randomness_pot_value_ = pot_value;
+	mutation_probability_ = static_cast<float>(randomness_pot_value_) / 255.0f;
+	previous_randomness_pot_value_ = pot_value;
+	LOG_INFO("SEQ", "randomness=%.2f source=pot3", mutation_probability_);
+}
+
+void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
+	Step& step_a = sequence_a_.steps[step_index];
+	Step& step_b = sequence_b_steps_[step_index];
+
+	const float old_voltage_a = step_a.voltage;
+	const float old_voltage_b = step_b.voltage;
+	const bool old_gate = step_a.gate;
+
+	bool mutated_a = false;
+	bool mutated_b = false;
+	bool mutated_gate = false;
+
+	if (mutation_probability_ > 0.0f && random_unit(rng_state_a_) < mutation_probability_) {
+		step_a.voltage = random_unit(rng_state_a_) * RANDOM_VOLTAGE_MAX;
+		mutated_a = true;
+	}
+
+	if (mutation_probability_ > 0.0f && random_unit(rng_state_b_) < mutation_probability_) {
+		step_b.voltage = random_unit(rng_state_b_) * RANDOM_VOLTAGE_MAX;
+		mutated_b = true;
+	}
+
+	if (mutation_probability_ > 0.0f && random_unit(rng_state_a_) < mutation_probability_) {
+		step_a.gate = random_unit(rng_state_a_) >= 0.4f;
+		mutated_gate = (step_a.gate != old_gate);
+	}
+
+	LOG_INFO(
+		"MUT",
+		"step=%u p=%.2f A:%.2f->%.2f mA=%u B:%.2f->%.2f mB=%u gate:%u->%u mG=%u",
+		static_cast<unsigned>(step_index + 1),
+		mutation_probability_,
+		old_voltage_a,
+		step_a.voltage,
+		mutated_a ? 1u : 0u,
+		old_voltage_b,
+		step_b.voltage,
+		mutated_b ? 1u : 0u,
+		old_gate ? 1u : 0u,
+		step_a.gate ? 1u : 0u,
+		mutated_gate ? 1u : 0u
+	);
+}
+
 void SequencerEngine::tick(uint64_t now_us) {
 	last_tick_time_us_ = now_us;
 
-	const uint8_t step_index = sequence_.position;
-	const Step& step = sequence_.steps[step_index];
+	const uint8_t step_index = sequence_a_.position;
+	apply_mutation_for_step(step_index);
+	const Step& step_a = sequence_a_.steps[step_index];
+	const Step& step_b = sequence_b_steps_[step_index];
 
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, step.voltage);
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, 0.0f);
+	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, step_a.voltage);
+	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, step_b.voltage);
 
-	if (step.gate) {
+	if (step_a.gate) {
 		gate_.set(true);
 		gate_active_ = true;
 		gate_off_time_us_ = now_us + GATE_PULSE_US;
@@ -159,26 +277,39 @@ void SequencerEngine::tick(uint64_t now_us) {
 
 	LOG_INFO(
 		"CLK",
-		"tick16 step=%u/%u bpm=%u voltage=%.2f gate=%u beat=%u",
+		"tick16 step=%u/%u bpm=%u cvA=%.2f cvB=%.2f gate=%u beat=%u",
 		static_cast<unsigned>(step_index + 1),
-		static_cast<unsigned>(sequence_.length),
+		static_cast<unsigned>(sequence_a_.length),
 		static_cast<unsigned>(bpm_),
-		step.voltage,
-		step.gate ? 1u : 0u,
+		step_a.voltage,
+		step_b.voltage,
+		step_a.gate ? 1u : 0u,
 		static_cast<unsigned>((tick_counter_ / STEPS_PER_QUARTER_NOTE) + 1)
 	);
 
 	tick_counter_++;
-	sequence_.position = static_cast<uint8_t>((step_index + 1) % sequence_.length);
+	sequence_a_.position = static_cast<uint8_t>((step_index + 1) % sequence_a_.length);
 }
 
 void SequencerEngine::reset_transport() {
 	playing_ = false;
-	sequence_.position = 0;
+	sequence_a_.position = 0;
 	last_tick_time_us_ = 0;
 	gate_off_time_us_ = 0;
 	gate_active_ = false;
 	tick_counter_ = 0;
 	gate_.set(false);
 	button_led_.off();
+}
+
+uint32_t SequencerEngine::next_random(uint32_t& state) {
+	state ^= state << 13;
+	state ^= state >> 17;
+	state ^= state << 5;
+	return state;
+}
+
+float SequencerEngine::random_unit(uint32_t& state) {
+	const uint32_t value = next_random(state) & 0x00FFFFFFu;
+	return static_cast<float>(value) / 16777215.0f;
 }
