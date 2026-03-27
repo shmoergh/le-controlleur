@@ -138,8 +138,12 @@ void SequencerEngine::init_sequence() {
 
 void SequencerEngine::init_io() {
 	brain::ui::PotsConfig pots_config = brain::ui::create_default_config();
-	pots_config.simple = true;
+	// Sequencer reads Pot 1 and Pot 3 continuously; keep mux settling enabled
+	// to avoid cross-channel bleed between adjacent reads.
+	pots_config.simple = false;
 	pots_config.output_resolution = 8;
+	pots_config.settling_delay_us = 150;
+	pots_config.samples_per_read = 3;
 	pots_.init(pots_config);
 
 	if (!dac_.init()) {
