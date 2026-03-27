@@ -6,7 +6,7 @@
 #include "debug-log.h"
 
 SequencerEngine::SequencerEngine() :
-	leds_(true),
+	leds_(false),
 	initialized_(false),
 	playing_(false),
 	gate_active_(false),
@@ -265,7 +265,10 @@ void SequencerEngine::init_pot_functions() {
 	length_cfg.pot_index = POT_INDEX_RANDOMNESS_OR_LENGTH;
 	length_cfg.min_value = 0;
 	length_cfg.max_value = 255;
-	length_cfg.initial_value = static_cast<uint8_t>(((static_cast<uint32_t>(sequence_a_.length - 1u)) * 255u) / 63u);
+	length_cfg.initial_value = static_cast<uint8_t>(
+		((static_cast<uint32_t>(sequence_a_.length - SEQUENCE_LENGTH_MIN)) * 255u)
+		/ static_cast<uint32_t>(SEQUENCE_LENGTH_MAX - SEQUENCE_LENGTH_MIN)
+	);
 	length_cfg.mode = brain::ui::PotMode::kValueScale;
 	length_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(length_cfg);
@@ -369,7 +372,7 @@ void SequencerEngine::update_randomness_or_length_from_pot3(bool force_apply) {
 
 	if (shift_active_) {
 		const uint8_t previous_length = sequence_a_.length;
-		const uint8_t new_length = static_cast<uint8_t>(1 + ((static_cast<uint32_t>(pot_value) * 63u) / 255u));
+		const uint8_t new_length = map_sequence_length_with_soft_snap(pot_value);
 		if (new_length > previous_length) {
 			for (uint8_t i = previous_length; i < new_length; ++i) {
 				sequence_a_.steps[i].pitch_q8 = static_cast<uint16_t>(next_random(rng_state_a_) % (RANDOM_MAX_Q8 + 1u));
@@ -387,6 +390,48 @@ void SequencerEngine::update_randomness_or_length_from_pot3(bool force_apply) {
 
 	randomness_pot_value_ = pot_value;
 	mutation_threshold_ = randomness_pot_value_;
+}
+
+uint8_t SequencerEngine::map_sequence_length_with_soft_snap(uint8_t pot_value) const {
+	static constexpr uint8_t SNAP_VALUES[] = {2, 4, 8, 16, 32};
+	const uint8_t mapped = static_cast<uint8_t>(
+		SEQUENCE_LENGTH_MIN
+		+ ((static_cast<uint32_t>(pot_value) * (SEQUENCE_LENGTH_MAX - SEQUENCE_LENGTH_MIN)) / 255u)
+	);
+
+	uint8_t snapped = mapped;
+	uint8_t best_distance = 255;
+	bool has_snap_candidate = false;
+
+	for (uint8_t i = 0; i < (sizeof(SNAP_VALUES) / sizeof(SNAP_VALUES[0])); ++i) {
+		const uint8_t target = SNAP_VALUES[i];
+		const uint8_t distance = (mapped > target) ? (mapped - target) : (target - mapped);
+		uint8_t snap_window = static_cast<uint8_t>(target / 16u);
+		if (snap_window < 1u) {
+			snap_window = 1u;
+		}
+
+		if (distance <= snap_window && distance < best_distance) {
+			best_distance = distance;
+			snapped = target;
+			has_snap_candidate = true;
+		}
+	}
+
+	return has_snap_candidate ? snapped : mapped;
+}
+
+bool SequencerEngine::is_power_of_two_sequence_length(uint8_t length) const {
+	return length > 0u && (length & static_cast<uint8_t>(length - 1u)) == 0u;
+}
+
+uint8_t SequencerEngine::sequence_length_led_count(uint8_t length) const {
+	if (length <= 2u) return 1u;
+	if (length <= 4u) return 2u;
+	if (length <= 8u) return 3u;
+	if (length <= 16u) return 4u;
+	if (length <= 31u) return 5u;
+	return 6u;
 }
 
 void SequencerEngine::apply_mutation_for_step(uint8_t step_index) {
@@ -427,7 +472,7 @@ void SequencerEngine::update_pot_led_overlay(uint64_t now_us) {
 	}
 
 	if (moved_pot < NUM_POTS && max_delta >= POT_LED_ACTIVITY_RAW_THRESHOLD) {
-		leds_.set_from_mask(active_pot_led_mask(moved_pot));
+		show_active_pot_overlay(moved_pot);
 		pot_led_overlay_active_ = true;
 		pot_led_overlay_last_change_us_ = now_us;
 		return;
@@ -443,6 +488,26 @@ void SequencerEngine::update_pot_led_overlay(uint64_t now_us) {
 
 	pot_led_overlay_active_ = false;
 	leds_.set_from_mask(gate_history_mask());
+}
+
+void SequencerEngine::show_active_pot_overlay(uint8_t pot_index) {
+	if (shift_active_ && pot_index == POT_INDEX_RANDOMNESS_OR_LENGTH) {
+		const uint8_t led_count = sequence_length_led_count(sequence_a_.length);
+		const uint8_t brightness = is_power_of_two_sequence_length(sequence_a_.length)
+			? 255u
+			: POT_LED_SOFT_BRIGHTNESS;
+		for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+			if (i < led_count) {
+				leds_.set_brightness(i, brightness);
+			} else {
+				leds_.off(i);
+			}
+		}
+		return;
+	}
+
+	const uint8_t mask = active_pot_led_mask(pot_index);
+	leds_.set_from_mask(mask);
 }
 
 uint8_t SequencerEngine::active_pot_percent_255(uint8_t pot_index) const {
@@ -469,12 +534,14 @@ uint8_t SequencerEngine::active_pot_percent_255(uint8_t pot_index) const {
 			}
 			break;
 
-		case POT_INDEX_RANDOMNESS_OR_LENGTH:
-			if (shift_active_) {
-				percent_255 = (static_cast<uint32_t>(sequence_a_.length - 1u) * 255u) / 63u;
-			} else {
-				percent_255 = randomness_pot_value_;
-			}
+			case POT_INDEX_RANDOMNESS_OR_LENGTH:
+				if (shift_active_) {
+					percent_255 =
+						(static_cast<uint32_t>(sequence_a_.length - SEQUENCE_LENGTH_MIN) * 255u)
+						/ static_cast<uint32_t>(SEQUENCE_LENGTH_MAX - SEQUENCE_LENGTH_MIN);
+				} else {
+					percent_255 = randomness_pot_value_;
+				}
 			break;
 
 		default:

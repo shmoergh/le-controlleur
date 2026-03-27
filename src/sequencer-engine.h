@@ -69,6 +69,8 @@ private:
 	static constexpr uint8_t NUM_POTS = 3;
 	static constexpr uint16_t BPM_MIN = 60;
 	static constexpr uint16_t BPM_MAX = 240;
+	static constexpr uint8_t SEQUENCE_LENGTH_MIN = 2;
+	static constexpr uint8_t SEQUENCE_LENGTH_MAX = 32;
 	static constexpr uint8_t RANGE_OCTAVES_MIN = 0;
 	static constexpr uint8_t RANGE_OCTAVES_MAX = 6;
 	static constexpr uint8_t QUANTIZATION_MODE_COUNT = 6;
@@ -76,6 +78,7 @@ private:
 	static constexpr uint32_t GATE_PULSE_US = 20000;
 	static constexpr uint32_t BUTTON_LED_BLINK_MS = 80;
 	static constexpr uint32_t BUTTON_LED_BLINK_INTERVAL_MS = 40;
+	static constexpr uint8_t POT_LED_SOFT_BRIGHTNESS = 48;
 	static constexpr uint16_t PITCH_Q8_PER_SEMITONE = 256;
 	static constexpr uint16_t SEMITONES_PER_OCTAVE = 12;
 	static constexpr uint16_t SOURCE_RANGE_OCTAVES = 5;
@@ -130,8 +133,12 @@ private:
 	void update_swing_from_pot1(bool force_apply = false);
 	void update_range_or_quantization_from_pot2(bool force_apply = false);
 	void update_randomness_or_length_from_pot3(bool force_apply = false);
+	uint8_t map_sequence_length_with_soft_snap(uint8_t pot_value) const;
+	bool is_power_of_two_sequence_length(uint8_t length) const;
+	uint8_t sequence_length_led_count(uint8_t length) const;
 	void apply_mutation_for_step(uint8_t step_index);
 	void update_pot_led_overlay(uint64_t now_us);
+	void show_active_pot_overlay(uint8_t pot_index);
 	uint8_t active_pot_percent_255(uint8_t pot_index) const;
 	uint8_t active_pot_led_mask(uint8_t pot_index) const;
 	uint8_t percent_to_led_mask(uint8_t percent_255) const;
