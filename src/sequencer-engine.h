@@ -58,6 +58,7 @@ public:
 	void on_midi_transport_stop();
 	void on_external_step_event(ExternalClockSource source, uint64_t event_us);
 	uint16_t tempo_bpm() const;
+	bool is_playing() const;
 	bool external_sync_enabled() const;
 	ExternalClockSource external_clock_source() const;
 	bool midi_transport_running() const;
@@ -170,6 +171,7 @@ private:
 	float last_quantized_voltage_;
 	bool pot_led_overlay_active_;
 	uint64_t pot_led_overlay_last_change_us_;
+	std::array<uint8_t, NUM_POTS> pot_raw_values_;
 	std::array<uint8_t, NUM_POTS> last_pot_raw_values_;
 	std::array<uint8_t, brain::ui::NO_OF_LEDS> gate_history_fifo_;
 	char gate_history_text_[brain::ui::NO_OF_LEDS + 1];
@@ -178,6 +180,7 @@ private:
 
 	void init_sequence();
 	void init_io();
+	void scan_pots_snapshot();
 	void init_pot_functions();
 	void set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function);
 	void update_pot_mappings(bool force_apply = false);

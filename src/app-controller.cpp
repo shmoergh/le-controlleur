@@ -71,6 +71,19 @@ void AppController::update() {
 			break;
 	}
 
+	bool allow_settings_commit = false;
+	switch (mode_) {
+		case AppMode::kMidiToCv:
+			allow_settings_commit = (midi_to_cv_engine_.get_state() == State::kDefault) && !midi_to_cv_engine_.is_note_playing();
+			break;
+		case AppMode::kSequencer:
+			allow_settings_commit = !sequencer_engine_.is_playing();
+			break;
+	}
+	if (!service_persisted_settings(allow_settings_commit)) {
+		LOG_ERROR("APP", "deferred settings commit failed");
+	}
+
 	render_status_block();
 }
 
@@ -357,7 +370,8 @@ void AppController::update_sequencer_midi_realtime() {
 	if (!sequencer_midi_parser_initialized_) {
 		return;
 	}
-	sequencer_midi_parser_.process_uart();
+	static constexpr uint16_t kMidiParserByteBudget = 64;
+	sequencer_midi_parser_.process_uart_budgeted(kMidiParserByteBudget);
 }
 
 void AppController::on_sequencer_midi_realtime(uint8_t status) {

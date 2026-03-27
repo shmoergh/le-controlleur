@@ -85,6 +85,14 @@ PersistedSettingsV3 default_settings() {
 	return settings;
 }
 
+struct DeferredWriteState {
+	PersistedSettingsV3 shadow_settings;
+	bool shadow_loaded;
+	bool dirty;
+};
+
+DeferredWriteState deferred_write_state = {default_settings(), false, false};
+
 bool load_v3(const PersistedSettingsV3& flash_settings, PersistedSettingsV3& out_settings) {
 	if (flash_settings.magic != SETTINGS_MAGIC || flash_settings.version != SETTINGS_VERSION_V3) {
 		return false;
@@ -160,6 +168,17 @@ bool load_settings(PersistedSettingsV3& out_settings) {
 	return load_v1(flash_v1, out_settings);
 }
 
+void ensure_shadow_loaded() {
+	if (deferred_write_state.shadow_loaded) {
+		return;
+	}
+
+	PersistedSettingsV3 loaded = default_settings();
+	load_settings(loaded);
+	deferred_write_state.shadow_settings = loaded;
+	deferred_write_state.shadow_loaded = true;
+}
+
 bool write_settings(const PersistedSettingsV3& settings) {
 	PersistedSettingsV3 to_write = settings;
 	to_write.magic = SETTINGS_MAGIC;
@@ -188,12 +207,8 @@ bool write_settings(const PersistedSettingsV3& settings) {
 }  // namespace
 
 bool load_persisted_midi_channel(uint8_t& out_channel) {
-	PersistedSettingsV3 settings{};
-	if (!load_settings(settings)) {
-		return false;
-	}
-
-	out_channel = settings.midi_channel;
+	ensure_shadow_loaded();
+	out_channel = deferred_write_state.shadow_settings.midi_channel;
 	return true;
 }
 
@@ -201,20 +216,19 @@ bool save_persisted_midi_channel(uint8_t channel) {
 	if (!is_valid_midi_channel(channel)) {
 		return false;
 	}
-
-	PersistedSettingsV3 settings = default_settings();
-	load_settings(settings);
-	settings.midi_channel = channel;
-	return write_settings(settings);
+	ensure_shadow_loaded();
+	if (deferred_write_state.shadow_settings.midi_channel == channel) {
+		return true;
+	}
+	deferred_write_state.shadow_settings.midi_channel = channel;
+	deferred_write_state.shadow_settings.checksum = checksum32(deferred_write_state.shadow_settings);
+	deferred_write_state.dirty = true;
+	return true;
 }
 
 bool load_persisted_app_mode(uint8_t& out_mode) {
-	PersistedSettingsV3 settings{};
-	if (!load_settings(settings)) {
-		return false;
-	}
-
-	out_mode = settings.app_mode;
+	ensure_shadow_loaded();
+	out_mode = deferred_write_state.shadow_settings.app_mode;
 	return true;
 }
 
@@ -222,20 +236,19 @@ bool save_persisted_app_mode(uint8_t mode) {
 	if (!is_valid_app_mode(mode)) {
 		return false;
 	}
-
-	PersistedSettingsV3 settings = default_settings();
-	load_settings(settings);
-	settings.app_mode = mode;
-	return write_settings(settings);
+	ensure_shadow_loaded();
+	if (deferred_write_state.shadow_settings.app_mode == mode) {
+		return true;
+	}
+	deferred_write_state.shadow_settings.app_mode = mode;
+	deferred_write_state.shadow_settings.checksum = checksum32(deferred_write_state.shadow_settings);
+	deferred_write_state.dirty = true;
+	return true;
 }
 
 bool load_persisted_root_note(uint8_t& out_root_note) {
-	PersistedSettingsV3 settings{};
-	if (!load_settings(settings)) {
-		return false;
-	}
-
-	out_root_note = settings.root_note;
+	ensure_shadow_loaded();
+	out_root_note = deferred_write_state.shadow_settings.root_note;
 	return true;
 }
 
@@ -243,9 +256,30 @@ bool save_persisted_root_note(uint8_t root_note) {
 	if (!is_valid_root_note(root_note)) {
 		return false;
 	}
+	ensure_shadow_loaded();
+	if (deferred_write_state.shadow_settings.root_note == root_note) {
+		return true;
+	}
+	deferred_write_state.shadow_settings.root_note = root_note;
+	deferred_write_state.shadow_settings.checksum = checksum32(deferred_write_state.shadow_settings);
+	deferred_write_state.dirty = true;
+	return true;
+}
 
-	PersistedSettingsV3 settings = default_settings();
-	load_settings(settings);
-	settings.root_note = root_note;
-	return write_settings(settings);
+bool service_persisted_settings(bool allow_commit) {
+	if (!allow_commit) {
+		return true;
+	}
+
+	ensure_shadow_loaded();
+	if (!deferred_write_state.dirty) {
+		return true;
+	}
+
+	if (!write_settings(deferred_write_state.shadow_settings)) {
+		return false;
+	}
+
+	deferred_write_state.dirty = false;
+	return true;
 }
