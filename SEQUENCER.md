@@ -18,7 +18,7 @@ Default startup values:
 - Tempo: `120 BPM`
 - Sequence length: `8`
 - Range: `3 octaves`
-- Quantization: `Chromatic`
+- Quantization: `Minor`
 - Swing: `0%`
 - Randomness: `0`
 - Transpose: `+2 octaves`, `+C`
@@ -92,7 +92,7 @@ While held:
 
 On release:
 
-- note transpose is persisted
+- transpose remains active for the current runtime
 
 Important behavior:
 
@@ -126,8 +126,8 @@ Live status prints include:
 ## Persistence
 
 - Last app mode is persisted.
-- Note transpose semitone (`C..B`) is persisted.
 - MIDI channel (used for transpose-note MIDI filtering) is shared with MIDI2CV setting.
+- Note transpose semitone always boots at `C` (no semitone transpose).
 
 ## Technical Notes
 

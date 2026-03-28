@@ -21,7 +21,7 @@ SequencerEngine::SequencerEngine() :
 	last_shift_context_(false),
 	swing_pot_value_(0),
 	range_octaves_(3),
-	quantization_mode_(QuantizationMode::kChromatic),
+	quantization_mode_(QuantizationMode::kMinor),
 	root_note_(0),
 	octave_transpose_(2),
 	has_persisted_root_note_(false),
@@ -55,7 +55,6 @@ SequencerEngine::SequencerEngine() :
 	gate_history_text_{'0', '0', '0', '0', '0', '0', '\0'},
 	rng_state_a_(0x12345678u),
 	rng_state_b_(0x87654321u) {
-	init_sequence();
 	init_io();
 }
 
@@ -469,24 +468,12 @@ void SequencerEngine::init_sequence() {
 	sequence_a_.length = 8;
 	sequence_a_.position = 0;
 
-	// Deterministic bring-up pattern.
-	sequence_a_.steps[0] = {0u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_a_.steps[1] = {6u * PITCH_Q8_PER_SEMITONE, false};
-	sequence_a_.steps[2] = {12u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_a_.steps[3] = {18u * PITCH_Q8_PER_SEMITONE, false};
-	sequence_a_.steps[4] = {24u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_a_.steps[5] = {30u * PITCH_Q8_PER_SEMITONE, false};
-	sequence_a_.steps[6] = {36u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_a_.steps[7] = {42u * PITCH_Q8_PER_SEMITONE, true};
-
-	sequence_b_steps_[0] = {3u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_b_steps_[1] = {9u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_b_steps_[2] = {15u * PITCH_Q8_PER_SEMITONE, false};
-	sequence_b_steps_[3] = {21u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_b_steps_[4] = {27u * PITCH_Q8_PER_SEMITONE, false};
-	sequence_b_steps_[5] = {33u * PITCH_Q8_PER_SEMITONE, true};
-	sequence_b_steps_[6] = {39u * PITCH_Q8_PER_SEMITONE, false};
-	sequence_b_steps_[7] = {45u * PITCH_Q8_PER_SEMITONE, true};
+	for (uint8_t i = 0; i < Sequence::kMaxSteps; ++i) {
+		sequence_a_.steps[i].pitch_q8 = static_cast<uint16_t>(next_random(rng_state_a_) % (RANDOM_MAX_Q8 + 1u));
+		sequence_a_.steps[i].gate = random_u8(rng_state_a_) >= 102u;
+		sequence_b_steps_[i].pitch_q8 = static_cast<uint16_t>(next_random(rng_state_b_) % (RANDOM_MAX_Q8 + 1u));
+		sequence_b_steps_[i].gate = random_u8(rng_state_b_) >= 102u;
+	}
 }
 
 void SequencerEngine::init_io() {
@@ -522,17 +509,27 @@ void SequencerEngine::init_io() {
 	last_pot_raw_values_ = pot_raw_values_;
 	root_edit_octave_pot_reference_raw_ = pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION];
 	root_edit_note_pot_reference_raw_ = pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH];
-
-	uint8_t persisted_root_note = 0;
-	if (load_persisted_root_note(persisted_root_note) && persisted_root_note < ROOT_NOTE_COUNT) {
-		root_note_ = persisted_root_note;
-		has_persisted_root_note_ = true;
-		persisted_root_note_ = persisted_root_note;
-	} else {
-		root_note_ = 0;
-		has_persisted_root_note_ = false;
-		persisted_root_note_ = 0;
+	uint32_t startup_seed = static_cast<uint32_t>(time_us_64());
+	startup_seed ^= static_cast<uint32_t>(time_us_64() >> 32);
+	for (uint8_t i = 0; i < NUM_POTS; ++i) {
+		startup_seed ^= static_cast<uint32_t>(pot_raw_values_[i]) << (i * 8u);
+		startup_seed = (startup_seed << 7) | (startup_seed >> 25);
+		startup_seed += 0x9E3779B9u + static_cast<uint32_t>(i);
 	}
+	if (startup_seed == 0u) {
+		startup_seed = 0xA341316Cu;
+	}
+	rng_state_a_ = startup_seed;
+	rng_state_b_ = startup_seed ^ 0x85EBCA6Bu;
+	if (rng_state_b_ == 0u) {
+		rng_state_b_ = 0xC2B2AE35u;
+	}
+	init_sequence();
+
+	// Always boot with note transpose at C (no semitone transpose).
+	root_note_ = 0;
+	has_persisted_root_note_ = false;
+	persisted_root_note_ = 0;
 
 	init_pot_functions();
 	initialized_ = true;
