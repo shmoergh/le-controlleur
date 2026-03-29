@@ -8,6 +8,11 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 {
 	init(cv_channel, midi_channel);
 	set_max_cc_voltage(5);
+	if (!enable_calibrated_output(true)) {
+		LOG_INFO("M2CV", "CV calibration unavailable; using raw output");
+	} else {
+		LOG_INFO("M2CV", "CV calibration loaded from flash");
+	}
 
 	midi_channel_ = midi_channel;
 	cv_channel_ = cv_channel;
@@ -268,6 +273,6 @@ void MidiToCVEngine::persist_midi_channel_if_needed() {
 		has_persisted_midi_channel_ = true;
 		persisted_midi_channel_ = midi_channel_;
 	} else {
-		LOG_ERROR("M2CV", "failed to save midi_channel=%u to flash", midi_channel_);
+		LOG_ERROR("M2CV", "failed to save midi_channel=%u to storage", midi_channel_);
 	}
 }
