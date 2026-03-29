@@ -26,6 +26,10 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	key_pressed_ = false;
 	has_persisted_midi_channel_ = false;
 	persisted_midi_channel_ = 0;
+	has_persisted_cv_channel_ = false;
+	persisted_cv_channel_ = 0;
+	has_persisted_mode_ = false;
+	persisted_mode_ = 0;
 	midi_channel_entry_raw_ = 0;
 	cv_channel_entry_raw_ = 0;
 	mode_entry_raw_ = 0;
@@ -219,7 +223,7 @@ void MidiToCVEngine::init_pot_functions() {
 void MidiToCVEngine::set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function) {
 	const uint8_t functions[NUM_POTS] = {pot_0_function, pot_1_function, pot_2_function};
 	pot_multi_function_.set_active_functions(functions, NUM_POTS);
-	pot_multi_function_.update(pots_);
+	pot_multi_function_.update_buffered(pots_, true);
 }
 
 void MidiToCVEngine::reset_pot_function_context() {
@@ -228,7 +232,11 @@ void MidiToCVEngine::reset_pot_function_context() {
 }
 
 void MidiToCVEngine::update_midi_channel_setting() {
-	if (!is_pickup_armed(POT_MIDI_CHANNEL, midi_channel_entry_raw_, midi_channel_pickup_armed_)) return;
+	if (!is_pickup_armed(
+			POT_MIDI_CHANNEL,
+			midi_channel_entry_raw_,
+			POT_MOVEMENT_ACTIVATION_THRESHOLD,
+			midi_channel_pickup_armed_)) return;
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_MIDI_CHANNEL)) return;
 	uint8_t pot_a_value = pot_multi_function_.get_value(POT_FUNCTION_ID_MIDI_CHANNEL);
 
@@ -238,7 +246,11 @@ void MidiToCVEngine::update_midi_channel_setting() {
 }
 
 void MidiToCVEngine::update_cv_channel_setting() {
-	if (!is_pickup_armed(POT_CV_CHANNEL, cv_channel_entry_raw_, cv_channel_pickup_armed_)) return;
+	if (!is_pickup_armed(
+			POT_CV_CHANNEL,
+			cv_channel_entry_raw_,
+			POT_MOVEMENT_ACTIVATION_THRESHOLD_CV_SETTINGS,
+			cv_channel_pickup_armed_)) return;
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_CV_CHANNEL)) return;
 	uint8_t pot_b_value = pot_multi_function_.get_value(POT_FUNCTION_ID_CV_CHANNEL);
 
@@ -250,7 +262,11 @@ void MidiToCVEngine::update_cv_channel_setting() {
 }
 
 void MidiToCVEngine::update_cc_setting() {
-	if (!is_pickup_armed(POT_MODE, mode_entry_raw_, mode_pickup_armed_)) return;
+	if (!is_pickup_armed(
+			POT_MODE,
+			mode_entry_raw_,
+			POT_MOVEMENT_ACTIVATION_THRESHOLD_CV_SETTINGS,
+			mode_pickup_armed_)) return;
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_MODE)) return;
 	uint8_t pot_c_value = pot_multi_function_.get_value(POT_FUNCTION_ID_MODE);
 	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
@@ -276,20 +292,28 @@ void MidiToCVEngine::load_settings() {
 		cv_channel_ = (persisted_cv_channel == 0u)
 			? brain::io::AudioCvOutChannel::kChannelA
 			: brain::io::AudioCvOutChannel::kChannelB;
+		has_persisted_cv_channel_ = true;
+		persisted_cv_channel_ = persisted_cv_channel;
 	} else {
 		uint8_t pot_b_value = pots_.get(POT_CV_CHANNEL);
 		cv_channel_ = (pot_b_value < POT_CV_CHANNEL_THRESHOLD)
 			? brain::io::AudioCvOutChannel::kChannelA
 			: brain::io::AudioCvOutChannel::kChannelB;
+		has_persisted_cv_channel_ = false;
+		persisted_cv_channel_ = 0;
 	}
 	set_pitch_channel(cv_channel_);
 
 	uint8_t persisted_mode = static_cast<uint8_t>(MidiToCV::Mode::kDefault);
 	if (load_persisted_midi_mode(persisted_mode) && persisted_mode <= static_cast<uint8_t>(MidiToCV::Mode::kDuo)) {
 		mode_ = MidiToCV::Mode(persisted_mode);
+		has_persisted_mode_ = true;
+		persisted_mode_ = persisted_mode;
 	} else {
 		uint8_t pot_c_value = pots_.get(POT_MODE);
 		mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
+		has_persisted_mode_ = false;
+		persisted_mode_ = 0;
 	}
 	set_mode(mode_);
 }
@@ -308,32 +332,55 @@ void MidiToCVEngine::persist_midi_channel_if_needed() {
 }
 
 void MidiToCVEngine::persist_cv_settings_if_needed() {
-	if (!save_persisted_midi_cv_channel(
-			cv_channel_ == brain::io::AudioCvOutChannel::kChannelA ? 0u : 1u)) {
-		LOG_ERROR("M2CV", "failed to save cv_channel to storage");
+	const uint8_t cv_channel_to_persist = (cv_channel_ == brain::io::AudioCvOutChannel::kChannelA) ? 0u : 1u;
+	const uint8_t mode_to_persist = static_cast<uint8_t>(mode_);
+
+	const bool cv_channel_changed = !has_persisted_cv_channel_ || persisted_cv_channel_ != cv_channel_to_persist;
+	const bool mode_changed = !has_persisted_mode_ || persisted_mode_ != mode_to_persist;
+	if (!cv_channel_changed && !mode_changed) {
+		return;
 	}
 
-	if (!save_persisted_midi_mode(static_cast<uint8_t>(mode_))) {
-		LOG_ERROR("M2CV", "failed to save mode=%u to storage", static_cast<unsigned>(mode_));
+	if (cv_channel_changed) {
+		if (save_persisted_midi_cv_channel(cv_channel_to_persist)) {
+			has_persisted_cv_channel_ = true;
+			persisted_cv_channel_ = cv_channel_to_persist;
+		} else {
+			LOG_ERROR("M2CV", "failed to save cv_channel to storage");
+		}
+	}
+
+	if (mode_changed) {
+		if (save_persisted_midi_mode(mode_to_persist)) {
+			has_persisted_mode_ = true;
+			persisted_mode_ = mode_to_persist;
+		} else {
+			LOG_ERROR("M2CV", "failed to save mode=%u to storage", static_cast<unsigned>(mode_));
+		}
 	}
 }
 
 uint8_t MidiToCVEngine::read_stable_pot(uint8_t pot_index) {
-	(void) pots_.get(pot_index);
-	return static_cast<uint8_t>(pots_.get(pot_index));
+	pots_.scan();
+	return static_cast<uint8_t>(pots_.get_buffered(pot_index));
 }
 
-bool MidiToCVEngine::is_pickup_armed(uint8_t pot_index, uint8_t entry_raw, bool& armed_flag) {
+bool MidiToCVEngine::is_pickup_armed(
+	uint8_t pot_index,
+	uint8_t entry_raw,
+	uint8_t movement_threshold,
+	bool& armed_flag
+) {
 	if (armed_flag) {
 		return true;
 	}
 
-	uint8_t current_raw = static_cast<uint8_t>(pots_.get(pot_index));
+	uint8_t current_raw = static_cast<uint8_t>(pots_.get_buffered(pot_index));
 	int32_t delta = static_cast<int32_t>(current_raw) - static_cast<int32_t>(entry_raw);
 	if (delta < 0) {
 		delta = -delta;
 	}
-	if (delta > POT_MOVEMENT_ACTIVATION_THRESHOLD) {
+	if (delta > movement_threshold) {
 		armed_flag = true;
 	}
 
