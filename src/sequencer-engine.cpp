@@ -8,6 +8,7 @@
 
 SequencerEngine::SequencerEngine() :
 	leds_(false),
+	calibrated_output_enabled_(false),
 	initialized_(false),
 	playing_(false),
 	gate_active_(false),
@@ -491,11 +492,17 @@ void SequencerEngine::init_io() {
 		initialized_ = false;
 		return;
 	}
+	calibrated_output_enabled_ = dac_.load_calibration_from_flash();
+	if (calibrated_output_enabled_) {
+		LOG_INFO("SEQ", "CV calibration loaded from flash");
+	} else {
+		LOG_INFO("SEQ", "CV calibration unavailable; using raw output");
+	}
 
 	dac_.set_coupling(brain::io::AudioCvOutChannel::kChannelA, brain::io::AudioCvOutCoupling::kDcCoupled);
 	dac_.set_coupling(brain::io::AudioCvOutChannel::kChannelB, brain::io::AudioCvOutCoupling::kDcCoupled);
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, 0.0f);
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, 0.0f);
+	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelA, 0.0f);
+	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelB, 0.0f);
 
 	gate_.begin();
 	gate_.set(false);
@@ -804,8 +811,8 @@ void SequencerEngine::refresh_output_after_root_change() {
 	const float output_voltage_a = pitch_q8_to_voltage(output_pitch_q8_a);
 	const float output_voltage_b = pitch_q8_to_voltage(output_pitch_q8_b);
 
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
-	dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
+	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
+	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
 	last_raw_voltage_ = pitch_q8_to_voltage(scaled_pitch_q8_a);
 	last_quantized_voltage_ = output_voltage_a;
 }
@@ -821,7 +828,7 @@ void SequencerEngine::persist_root_note_if_needed() {
 		return;
 	}
 
-	LOG_ERROR("SEQ", "failed to save root_note=%u to flash", static_cast<unsigned>(root_note_));
+	LOG_ERROR("SEQ", "failed to save root_note=%u to storage", static_cast<unsigned>(root_note_));
 }
 
 uint8_t SequencerEngine::map_sequence_length_with_soft_snap(uint8_t pot_value) const {
@@ -1103,6 +1110,14 @@ uint8_t SequencerEngine::gate_history_mask() const {
 	return mask;
 }
 
+void SequencerEngine::write_pitch_voltage(brain::io::AudioCvOutChannel channel, float voltage) {
+	if (calibrated_output_enabled_) {
+		dac_.set_voltage_calibrated(channel, voltage);
+		return;
+	}
+	dac_.set_voltage(channel, voltage);
+}
+
 void SequencerEngine::tick(uint64_t now_us) {
 	const uint8_t step_index = sequence_a_.position;
 	apply_mutation_for_step(step_index);
@@ -1116,8 +1131,8 @@ void SequencerEngine::tick(uint64_t now_us) {
 	const float output_voltage_b = pitch_q8_to_voltage(output_pitch_q8_b);
 
 	if (step_a.gate) {
-		dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
-		dac_.set_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
+		write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
+		write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
 		last_raw_voltage_ = pitch_q8_to_voltage(scaled_pitch_q8_a);
 		last_quantized_voltage_ = output_voltage_a;
 		gate_.set(true);

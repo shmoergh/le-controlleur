@@ -18,6 +18,10 @@ include(brain-sdk/pico_sdk_import.cmake)
 
 project(le_controlleur C CXX ASM)
 
+# Reserve top-of-flash sectors for Brain SDK storage before pico_sdk_init().
+include(brain-sdk/cmake/brain-storage-reserve-flash.cmake)
+brain_storage_configure_flash_reservation()
+
 option(LE_CONTROLLEUR_DEBUG_LOG "Enable debug logging" ON)
 set(LE_CONTROLLEUR_DEBUG_LEVEL 1 CACHE STRING "Debug verbosity: 0=error,1=info,2=trace")
 set(LE_CONTROLLEUR_VERSION "0.1.0-dev" CACHE STRING "Firmware version string")

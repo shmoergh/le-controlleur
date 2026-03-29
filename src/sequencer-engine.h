@@ -129,6 +129,7 @@ private:
 	brain::io::Pulse gate_;
 	brain::ui::Leds leds_;
 	brain::ui::ButtonLed button_led_;
+	bool calibrated_output_enabled_;
 
 	bool initialized_;
 	bool playing_;
@@ -208,6 +209,7 @@ private:
 	void push_gate_history(bool gate_high);
 	void refresh_gate_history_view();
 	uint8_t gate_history_mask() const;
+	void write_pitch_voltage(brain::io::AudioCvOutChannel channel, float voltage);
 	void tick(uint64_t now_us);
 	void update_external_clock_source(uint64_t now_us);
 	void handle_external_pulse_edge(uint64_t now_us);

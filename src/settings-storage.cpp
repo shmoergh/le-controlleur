@@ -2,9 +2,7 @@
 
 #include <cstring>
 
-#include "hardware/flash.h"
-#include "hardware/sync.h"
-#include "pico/stdlib.h"
+#include "brain-storage/storage.h"
 
 namespace {
 
@@ -16,12 +14,6 @@ constexpr uint8_t APP_MODE_MIDI_TO_CV = 0;
 constexpr uint8_t APP_MODE_SEQUENCER = 1;
 constexpr uint8_t ROOT_NOTE_MIN = 0;
 constexpr uint8_t ROOT_NOTE_MAX = 11;
-
-#ifndef PICO_FLASH_SIZE_BYTES
-#define PICO_FLASH_SIZE_BYTES (2 * 1024 * 1024)
-#endif
-
-constexpr uint32_t SETTINGS_FLASH_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
 struct PersistedSettingsV1 {
 	uint32_t magic;
@@ -152,20 +144,34 @@ bool load_v1(const PersistedSettingsV1& flash_settings, PersistedSettingsV3& out
 }
 
 bool load_settings(PersistedSettingsV3& out_settings) {
-	const uint8_t* flash_base = reinterpret_cast<const uint8_t*>(XIP_BASE + SETTINGS_FLASH_OFFSET);
-	const PersistedSettingsV3 flash_v3 = *reinterpret_cast<const PersistedSettingsV3*>(flash_base);
+	uint8_t blob[brain::storage::layout::kAppDataRegionSizeBytes];
+	size_t actual_size = 0;
+	const brain::storage::StorageStatus status =
+		brain::storage::read_app_blob(blob, sizeof(blob), &actual_size);
 
-	if (load_v3(flash_v3, out_settings)) {
-		return true;
+	if (status != brain::storage::StorageStatus::kOk || actual_size == 0) {
+		return false;
 	}
 
-	const PersistedSettingsV2 flash_v2 = *reinterpret_cast<const PersistedSettingsV2*>(flash_base);
-	if (load_v2(flash_v2, out_settings)) {
-		return true;
+	if (actual_size == sizeof(PersistedSettingsV3)) {
+		PersistedSettingsV3 stored{};
+		memcpy(&stored, blob, sizeof(stored));
+		return load_v3(stored, out_settings);
 	}
 
-	const PersistedSettingsV1 flash_v1 = *reinterpret_cast<const PersistedSettingsV1*>(flash_base);
-	return load_v1(flash_v1, out_settings);
+	if (actual_size == sizeof(PersistedSettingsV2)) {
+		PersistedSettingsV2 stored{};
+		memcpy(&stored, blob, sizeof(stored));
+		return load_v2(stored, out_settings);
+	}
+
+	if (actual_size == sizeof(PersistedSettingsV1)) {
+		PersistedSettingsV1 stored{};
+		memcpy(&stored, blob, sizeof(stored));
+		return load_v1(stored, out_settings);
+	}
+
+	return false;
 }
 
 void ensure_shadow_loaded() {
@@ -185,14 +191,11 @@ bool write_settings(const PersistedSettingsV3& settings) {
 	to_write.version = SETTINGS_VERSION_V3;
 	to_write.checksum = checksum32(to_write);
 
-	uint8_t page_buffer[FLASH_PAGE_SIZE];
-	memset(page_buffer, 0xFF, sizeof(page_buffer));
-	memcpy(page_buffer, &to_write, sizeof(to_write));
-
-	uint32_t interrupts = save_and_disable_interrupts();
-	flash_range_erase(SETTINGS_FLASH_OFFSET, FLASH_SECTOR_SIZE);
-	flash_range_program(SETTINGS_FLASH_OFFSET, page_buffer, FLASH_PAGE_SIZE);
-	restore_interrupts(interrupts);
+	const brain::storage::StorageStatus status =
+		brain::storage::write_app_blob(&to_write, sizeof(to_write));
+	if (status != brain::storage::StorageStatus::kOk) {
+		return false;
+	}
 
 	PersistedSettingsV3 verify{};
 	if (!load_settings(verify)) {
