@@ -26,6 +26,12 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	key_pressed_ = false;
 	has_persisted_midi_channel_ = false;
 	persisted_midi_channel_ = 0;
+	midi_channel_entry_raw_ = 0;
+	cv_channel_entry_raw_ = 0;
+	mode_entry_raw_ = 0;
+	midi_channel_pickup_armed_ = false;
+	cv_channel_pickup_armed_ = false;
+	mode_pickup_armed_ = false;
 
 	// Pots setup
 	brain::ui::PotsConfig pots_config = brain::ui::create_default_config();
@@ -42,6 +48,7 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 void MidiToCVEngine::on_button_a_press() {
 	if (state_ == State::kDefault) {
 		state_ = State::kSetMidiChannel;
+		arm_midi_channel_pickup();
 	}
 }
 
@@ -57,6 +64,7 @@ void MidiToCVEngine::on_button_a_release() {
 void MidiToCVEngine::on_button_b_press() {
 	if (state_ == State::kDefault) {
 		state_ = State::kSetCVChannel;
+		arm_cv_settings_pickup();
 	}
 }
 
@@ -64,6 +72,7 @@ void MidiToCVEngine::on_button_b_release() {
 	if (state_ == State::kSetCVChannel) {
 		set_pitch_channel(cv_channel_);
 		MidiToCV::set_mode(mode_);
+		persist_cv_settings_if_needed();
 		reset_pot_function_context();
 	}
 	state_ = State::kDefault;
@@ -167,13 +176,21 @@ uint8_t MidiToCVEngine::get_midi_channel() const {
 
 void MidiToCVEngine::init_pot_functions() {
 	pot_multi_function_.init();
+	const uint8_t initial_midi_channel_value = static_cast<uint8_t>(
+		clamp(0, 255, static_cast<int32_t>((midi_channel_ - 1) * 16 + 8))
+	);
+	const uint8_t initial_cv_channel_value =
+		(cv_channel_ == brain::io::AudioCvOutChannel::kChannelA) ? 63u : 191u;
+	const uint8_t initial_mode_value = static_cast<uint8_t>(
+		clamp(0, 255, static_cast<int32_t>(static_cast<uint8_t>(mode_) * 64 + 32))
+	);
 
 	brain::ui::PotFunctionConfig midi_channel_cfg;
 	midi_channel_cfg.function_id = POT_FUNCTION_ID_MIDI_CHANNEL;
 	midi_channel_cfg.pot_index = POT_MIDI_CHANNEL;
 	midi_channel_cfg.min_value = 0;
 	midi_channel_cfg.max_value = 255;
-	midi_channel_cfg.initial_value = pots_.get(POT_MIDI_CHANNEL);
+	midi_channel_cfg.initial_value = initial_midi_channel_value;
 	midi_channel_cfg.mode = PotMode::kValueScale;
 	midi_channel_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(midi_channel_cfg);
@@ -183,7 +200,7 @@ void MidiToCVEngine::init_pot_functions() {
 	cv_channel_cfg.pot_index = POT_CV_CHANNEL;
 	cv_channel_cfg.min_value = 0;
 	cv_channel_cfg.max_value = 255;
-	cv_channel_cfg.initial_value = pots_.get(POT_CV_CHANNEL);
+	cv_channel_cfg.initial_value = initial_cv_channel_value;
 	cv_channel_cfg.mode = PotMode::kValueScale;
 	cv_channel_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(cv_channel_cfg);
@@ -193,7 +210,7 @@ void MidiToCVEngine::init_pot_functions() {
 	mode_cfg.pot_index = POT_MODE;
 	mode_cfg.min_value = 0;
 	mode_cfg.max_value = 255;
-	mode_cfg.initial_value = pots_.get(POT_MODE);
+	mode_cfg.initial_value = initial_mode_value;
 	mode_cfg.mode = PotMode::kValueScale;
 	mode_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(mode_cfg);
@@ -211,6 +228,7 @@ void MidiToCVEngine::reset_pot_function_context() {
 }
 
 void MidiToCVEngine::update_midi_channel_setting() {
+	if (!is_pickup_armed(POT_MIDI_CHANNEL, midi_channel_entry_raw_, midi_channel_pickup_armed_)) return;
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_MIDI_CHANNEL)) return;
 	uint8_t pot_a_value = pot_multi_function_.get_value(POT_FUNCTION_ID_MIDI_CHANNEL);
 
@@ -220,6 +238,7 @@ void MidiToCVEngine::update_midi_channel_setting() {
 }
 
 void MidiToCVEngine::update_cv_channel_setting() {
+	if (!is_pickup_armed(POT_CV_CHANNEL, cv_channel_entry_raw_, cv_channel_pickup_armed_)) return;
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_CV_CHANNEL)) return;
 	uint8_t pot_b_value = pot_multi_function_.get_value(POT_FUNCTION_ID_CV_CHANNEL);
 
@@ -231,6 +250,7 @@ void MidiToCVEngine::update_cv_channel_setting() {
 }
 
 void MidiToCVEngine::update_cc_setting() {
+	if (!is_pickup_armed(POT_MODE, mode_entry_raw_, mode_pickup_armed_)) return;
 	if (!pot_multi_function_.get_changed(POT_FUNCTION_ID_MODE)) return;
 	uint8_t pot_c_value = pot_multi_function_.get_value(POT_FUNCTION_ID_MODE);
 	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
@@ -238,7 +258,7 @@ void MidiToCVEngine::update_cc_setting() {
 
 void MidiToCVEngine::load_settings() {
 	uint8_t persisted_channel = 0;
-	if (load_persisted_midi_channel(persisted_channel)) {
+	if (load_persisted_midi_channel(persisted_channel) && persisted_channel >= 1 && persisted_channel <= 16) {
 		midi_channel_ = persisted_channel;
 		has_persisted_midi_channel_ = true;
 		persisted_midi_channel_ = persisted_channel;
@@ -251,16 +271,26 @@ void MidiToCVEngine::load_settings() {
 	}
 	set_midi_channel(midi_channel_);
 
-	uint8_t pot_b_value = pots_.get(POT_CV_CHANNEL);
-	if (pot_b_value < POT_CV_CHANNEL_THRESHOLD) {
-		cv_channel_ = brain::io::AudioCvOutChannel::kChannelA;
+	uint8_t persisted_cv_channel = 0;
+	if (load_persisted_midi_cv_channel(persisted_cv_channel) && persisted_cv_channel <= 1u) {
+		cv_channel_ = (persisted_cv_channel == 0u)
+			? brain::io::AudioCvOutChannel::kChannelA
+			: brain::io::AudioCvOutChannel::kChannelB;
 	} else {
-		cv_channel_ = brain::io::AudioCvOutChannel::kChannelB;
+		uint8_t pot_b_value = pots_.get(POT_CV_CHANNEL);
+		cv_channel_ = (pot_b_value < POT_CV_CHANNEL_THRESHOLD)
+			? brain::io::AudioCvOutChannel::kChannelA
+			: brain::io::AudioCvOutChannel::kChannelB;
 	}
 	set_pitch_channel(cv_channel_);
 
-	uint8_t pot_c_value = pots_.get(POT_MODE);
-	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
+	uint8_t persisted_mode = static_cast<uint8_t>(MidiToCV::Mode::kDefault);
+	if (load_persisted_midi_mode(persisted_mode) && persisted_mode <= static_cast<uint8_t>(MidiToCV::Mode::kDuo)) {
+		mode_ = MidiToCV::Mode(persisted_mode);
+	} else {
+		uint8_t pot_c_value = pots_.get(POT_MODE);
+		mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
+	}
 	set_mode(mode_);
 }
 
@@ -275,4 +305,49 @@ void MidiToCVEngine::persist_midi_channel_if_needed() {
 	} else {
 		LOG_ERROR("M2CV", "failed to save midi_channel=%u to storage", midi_channel_);
 	}
+}
+
+void MidiToCVEngine::persist_cv_settings_if_needed() {
+	if (!save_persisted_midi_cv_channel(
+			cv_channel_ == brain::io::AudioCvOutChannel::kChannelA ? 0u : 1u)) {
+		LOG_ERROR("M2CV", "failed to save cv_channel to storage");
+	}
+
+	if (!save_persisted_midi_mode(static_cast<uint8_t>(mode_))) {
+		LOG_ERROR("M2CV", "failed to save mode=%u to storage", static_cast<unsigned>(mode_));
+	}
+}
+
+uint8_t MidiToCVEngine::read_stable_pot(uint8_t pot_index) {
+	(void) pots_.get(pot_index);
+	return static_cast<uint8_t>(pots_.get(pot_index));
+}
+
+bool MidiToCVEngine::is_pickup_armed(uint8_t pot_index, uint8_t entry_raw, bool& armed_flag) {
+	if (armed_flag) {
+		return true;
+	}
+
+	uint8_t current_raw = static_cast<uint8_t>(pots_.get(pot_index));
+	int32_t delta = static_cast<int32_t>(current_raw) - static_cast<int32_t>(entry_raw);
+	if (delta < 0) {
+		delta = -delta;
+	}
+	if (delta > POT_MOVEMENT_ACTIVATION_THRESHOLD) {
+		armed_flag = true;
+	}
+
+	return armed_flag;
+}
+
+void MidiToCVEngine::arm_midi_channel_pickup() {
+	midi_channel_entry_raw_ = read_stable_pot(POT_MIDI_CHANNEL);
+	midi_channel_pickup_armed_ = false;
+}
+
+void MidiToCVEngine::arm_cv_settings_pickup() {
+	cv_channel_entry_raw_ = read_stable_pot(POT_CV_CHANNEL);
+	mode_entry_raw_ = read_stable_pot(POT_MODE);
+	cv_channel_pickup_armed_ = false;
+	mode_pickup_armed_ = false;
 }

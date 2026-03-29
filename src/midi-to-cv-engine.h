@@ -31,6 +31,7 @@ constexpr uint8_t POT_FUNCTION_ID_MIDI_CHANNEL = 1;
 constexpr uint8_t POT_FUNCTION_ID_CV_CHANNEL = 2;
 constexpr uint8_t POT_FUNCTION_ID_MODE = 3;
 constexpr uint8_t POT_FUNCTION_PICKUP_HYSTERESIS = 1;
+constexpr uint8_t POT_MOVEMENT_ACTIVATION_THRESHOLD = 2;
 constexpr uint8_t NUM_POTS = 3;
 
 enum State {
@@ -67,6 +68,12 @@ private:
 	bool reset_leds_;
 	bool has_persisted_midi_channel_;
 	uint8_t persisted_midi_channel_;
+	uint8_t midi_channel_entry_raw_;
+	uint8_t cv_channel_entry_raw_;
+	uint8_t mode_entry_raw_;
+	bool midi_channel_pickup_armed_;
+	bool cv_channel_pickup_armed_;
+	bool mode_pickup_armed_;
 
 	void set_leds_from_mask(uint8_t mask);
 
@@ -79,6 +86,11 @@ private:
 	void update_cc_setting();
 	void load_settings();
 	void persist_midi_channel_if_needed();
+	void persist_cv_settings_if_needed();
+	uint8_t read_stable_pot(uint8_t pot_index);
+	bool is_pickup_armed(uint8_t pot_index, uint8_t entry_raw, bool& armed_flag);
+	void arm_midi_channel_pickup();
+	void arm_cv_settings_pickup();
 };
 
 #endif
