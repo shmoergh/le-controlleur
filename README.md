@@ -20,9 +20,6 @@ The [Sequencer](./SEQUENCER.md) generates random notes and rhythms depending on 
 
 The [MIDI to CV Mode converter](./MIDI2CV.md) enables you to use external MIDI gear with the Moduleur. Connect your keyboard or sequencer to the MIDI in of the Brain module with a TRS-A MIDI cable and you can use the outputs of the Brain to control gate, pitch and more on the Moduleur.
 
-### Switching Main Modes
-
-To switch between `Sequencer` and `MIDI to CV`, press and hold `Button A + Button B` together for about `1.5 seconds`.
 
 ## Build
 
