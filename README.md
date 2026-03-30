@@ -14,6 +14,11 @@ Flash `le-controlleur-pico.uf2` (or `le-controlleur-pico-2.uf2` for Pico 2) to y
 
 ## User Guide
 
+There are two distinct modes in this firmware:
+
+1. Sequencer
+2. MIDI to CV converter
+
 By default the program is in Sequencer mode. To switch between the modes, hold A + B buttons for about 1.5s. Switching modes is indicated by a quick animation on the LED strip.
 
 The [Sequencer](./SEQUENCER.md) generates random notes and rhythms depending on where you turn Pot Z: turned fully clockwise will result in all notes being random, while turned all the way down will lock in the actual sequence. In between values will morph and change a few notes, organically creating new sequences.
