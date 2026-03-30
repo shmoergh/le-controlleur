@@ -14,8 +14,11 @@ Flash `le-controlleur-pico.uf2` (or `le-controlleur-pico-2.uf2` for Pico 2) to y
 
 ## User Guide
 
-- [Sequencer Mode](./SEQUENCER.md)
-- [MIDI to CV Mode](./MIDI2CV.md)
+By default the program is in Sequencer mode. To switch between the modes, hold A + B buttons for about 1.5s. Switching modes is indicated by a quick animation on the LED strip.
+
+The [Sequencer](./SEQUENCER.md) generates random notes and rhythms depending on where you turn Pot Z: turned fully clockwise will result in all notes being random, while turned all the way down will lock in the actual sequence. In between values will morph and change a few notes, organically creating new sequences.
+
+The [MIDI to CV Mode converter](./MIDI2CV.md) enables you to use external MIDI gear with the Moduleur. Connect your keyboard or sequencer to the MIDI in of the Brain module with a TRS-A MIDI cable and you can use the outputs of the Brain to control gate, pitch and more on the Moduleur.
 
 ### Switching Main Modes
 
