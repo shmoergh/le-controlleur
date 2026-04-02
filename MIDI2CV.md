@@ -6,7 +6,7 @@ Use this mode for performance-oriented patches where fast channel/mode switching
 
 ## Features
 
-- **MIDI to CV/Gate conversion**: Converts MIDI note-on/note-off messages to 1V/octave pitch CV and gate signals
+- **MIDI to CV/Gate conversion**: Converts MIDI note-on/note-off to 1V/octave pitch CV and gate, with pitch-bend support on pitch outputs (default +/-2 semitones)
 - **Configurable MIDI channel**: Listen to any MIDI channel (1-16) with visual feedback via LEDs
 - **Dual CV outputs**: Route pitch and gate to either output channel of the Brain module
 - **CC to CV mapping**: Secondary CV output can provide velocity, modwheel, unison pitch, or duophonic split
