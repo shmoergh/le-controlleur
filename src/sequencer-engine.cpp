@@ -2,7 +2,6 @@
 
 #include "pico/time.h"
 
-#include "brain-ui/pots.h"
 #include "debug-log.h"
 #include "settings-storage.h"
 
@@ -65,7 +64,6 @@ void SequencerEngine::update() {
 	}
 
 	leds_.update();
-	button_led_.update();
 	scan_pots_snapshot();
 	update_pot_mappings();
 
@@ -81,7 +79,7 @@ void SequencerEngine::update() {
 		pot_led_overlay_active_ = true;
 		pot_led_overlay_last_change_us_ = now_us;
 	}
-	const bool pulse_in_high = gate_.read();
+	const bool pulse_in_high = pulse_input_.pulse_read();
 	if (pulse_in_high && !last_pulse_in_high_) {
 		handle_external_pulse_edge(now_us);
 	}
@@ -92,7 +90,7 @@ void SequencerEngine::update() {
 	}
 
 	if (gate_active_ && now_us >= gate_off_time_us_) {
-		gate_.set(false);
+		dac_.pulse_set(false);
 		gate_active_ = false;
 	}
 	handle_pending_external_swing_tick(now_us);
@@ -137,7 +135,7 @@ void SequencerEngine::on_mode_enter() {
 	}
 
 	// Shared 6-LED bus: sequencer uses PWM for dim overlays.
-	leds_.set_mode(brain::ui::LedMode::kPwm);
+	leds_.set_mode(LedMode::kPwm);
 	reset_transport();
 	root_edit_armed_ = false;
 	shift_active_ = false;
@@ -153,7 +151,7 @@ void SequencerEngine::on_mode_exit() {
 
 	reset_transport();
 	// Return shared LEDs to simple GPIO mode for MIDI 2 CV.
-	leds_.set_mode(brain::ui::LedMode::kSimple);
+	leds_.set_mode(LedMode::kSimple);
 	leds_.off_all();
 	if (root_edit_armed_) {
 		persist_root_note_if_needed();
@@ -175,14 +173,14 @@ void SequencerEngine::on_button_a_short_press() {
 		tick_counter_ = 0;
 		clear_external_swing_pending();
 	} else {
-		gate_.set(false);
+		dac_.pulse_set(false);
 		gate_active_ = false;
 		clear_external_swing_pending();
 		midi_clock_ticks_since_step_ = 0;
 		pending_midi_step_events_ = 0;
 		last_midi_clock_tick_us_ = 0;
 		last_midi_event_us_ = 0;
-		button_led_.off();
+		leds_.button_off();
 	}
 }
 
@@ -312,7 +310,7 @@ void SequencerEngine::on_midi_transport_start() {
 	tick_counter_ = 0;
 	playing_ = true;
 	next_tick_due_us_ = 0;
-	gate_.set(false);
+	dac_.pulse_set(false);
 	gate_active_ = false;
 }
 
@@ -355,9 +353,9 @@ void SequencerEngine::on_midi_transport_stop() {
 	}
 
 	playing_ = false;
-	gate_.set(false);
+	dac_.pulse_set(false);
 	gate_active_ = false;
-	button_led_.off();
+	leds_.button_off();
 }
 
 void SequencerEngine::on_external_step_event(ExternalClockSource source, uint64_t event_us) {
@@ -478,7 +476,7 @@ void SequencerEngine::init_sequence() {
 }
 
 void SequencerEngine::init_io() {
-	brain::ui::PotsConfig pots_config = brain::ui::create_default_config();
+	PotsConfig pots_config = create_default_pots_config();
 	// Sequencer reads Pot 1 and Pot 3 continuously; keep mux settling enabled
 	// to avoid cross-channel bleed between adjacent reads.
 	pots_config.simple = false;
@@ -499,18 +497,22 @@ void SequencerEngine::init_io() {
 		LOG_INFO("SEQ", "CV calibration unavailable; using raw output");
 	}
 
-	dac_.set_coupling(brain::io::AudioCvOutChannel::kChannelA, brain::io::AudioCvOutCoupling::kDcCoupled);
-	dac_.set_coupling(brain::io::AudioCvOutChannel::kChannelB, brain::io::AudioCvOutCoupling::kDcCoupled);
-	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelA, 0.0f);
-	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelB, 0.0f);
+	dac_.set_output_range(AudioCvOutChannel::kChannelA, AudioCvOutRange::kRange0To10V);
+	dac_.set_output_range(AudioCvOutChannel::kChannelB, AudioCvOutRange::kRange0To10V);
+	write_pitch_voltage(AudioCvOutChannel::kChannelA, 0.0f);
+	write_pitch_voltage(AudioCvOutChannel::kChannelB, 0.0f);
 
-	gate_.begin();
-	gate_.set(false);
+	if (!pulse_input_.init_pulse()) {
+		LOG_ERROR("SEQ", "Pulse input init failed");
+		initialized_ = false;
+		return;
+	}
+	dac_.pulse_set(false);
 	// Keep simple mode when sequencer is inactive so MIDI 2 CV LED writes work.
-	leds_.init(brain::ui::LedMode::kSimple);
+	leds_.init(LedMode::kSimple);
 	leds_.off_all();
-	button_led_.init();
-	button_led_.off();
+	leds_.button_init();
+	leds_.button_off();
 	reset_gate_history();
 	scan_pots_snapshot();
 	last_pot_raw_values_ = pot_raw_values_;
@@ -546,57 +548,57 @@ void SequencerEngine::init_io() {
 void SequencerEngine::init_pot_functions() {
 	pot_multi_function_.init();
 
-	brain::ui::PotFunctionConfig bpm_cfg;
+	PotFunctionConfig bpm_cfg;
 	bpm_cfg.function_id = POT_FUNCTION_ID_BPM;
 	bpm_cfg.pot_index = POT_INDEX_BPM;
 	bpm_cfg.min_value = 0;
 	bpm_cfg.max_value = 255;
 	bpm_cfg.initial_value = static_cast<uint8_t>((static_cast<uint32_t>(bpm_ - BPM_MIN) * 255u) / (BPM_MAX - BPM_MIN));
-	bpm_cfg.mode = brain::ui::PotMode::kValueScale;
+	bpm_cfg.mode = PotMode::kValueScale;
 	bpm_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(bpm_cfg);
 
-	brain::ui::PotFunctionConfig swing_cfg;
+	PotFunctionConfig swing_cfg;
 	swing_cfg.function_id = POT_FUNCTION_ID_SWING;
 	swing_cfg.pot_index = POT_INDEX_BPM;
 	swing_cfg.min_value = 0;
 	swing_cfg.max_value = 255;
 	swing_cfg.initial_value = 0;
-	swing_cfg.mode = brain::ui::PotMode::kValueScale;
+	swing_cfg.mode = PotMode::kValueScale;
 	swing_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(swing_cfg);
 
-	brain::ui::PotFunctionConfig range_cfg;
+	PotFunctionConfig range_cfg;
 	range_cfg.function_id = POT_FUNCTION_ID_RANGE;
 	range_cfg.pot_index = POT_INDEX_RANGE_OR_QUANTIZATION;
 	range_cfg.min_value = 0;
 	range_cfg.max_value = 255;
 	range_cfg.initial_value = static_cast<uint8_t>((static_cast<uint32_t>(range_octaves_) * 255u) / RANGE_OCTAVES_MAX);
-	range_cfg.mode = brain::ui::PotMode::kValueScale;
+	range_cfg.mode = PotMode::kValueScale;
 	range_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(range_cfg);
 
-	brain::ui::PotFunctionConfig quant_cfg;
+	PotFunctionConfig quant_cfg;
 	quant_cfg.function_id = POT_FUNCTION_ID_QUANTIZATION;
 	quant_cfg.pot_index = POT_INDEX_RANGE_OR_QUANTIZATION;
 	quant_cfg.min_value = 0;
 	quant_cfg.max_value = 255;
 	quant_cfg.initial_value = static_cast<uint8_t>((static_cast<uint32_t>(static_cast<uint8_t>(quantization_mode_)) * 255u) / (QUANTIZATION_MODE_COUNT - 1));
-	quant_cfg.mode = brain::ui::PotMode::kValueScale;
+	quant_cfg.mode = PotMode::kValueScale;
 	quant_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(quant_cfg);
 
-	brain::ui::PotFunctionConfig randomness_cfg;
+	PotFunctionConfig randomness_cfg;
 	randomness_cfg.function_id = POT_FUNCTION_ID_RANDOMNESS;
 	randomness_cfg.pot_index = POT_INDEX_RANDOMNESS_OR_LENGTH;
 	randomness_cfg.min_value = 0;
 	randomness_cfg.max_value = 255;
 	randomness_cfg.initial_value = randomness_pot_value_;
-	randomness_cfg.mode = brain::ui::PotMode::kValueScale;
+	randomness_cfg.mode = PotMode::kValueScale;
 	randomness_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(randomness_cfg);
 
-	brain::ui::PotFunctionConfig length_cfg;
+	PotFunctionConfig length_cfg;
 	length_cfg.function_id = POT_FUNCTION_ID_LENGTH;
 	length_cfg.pot_index = POT_INDEX_RANDOMNESS_OR_LENGTH;
 	length_cfg.min_value = 0;
@@ -605,7 +607,7 @@ void SequencerEngine::init_pot_functions() {
 		((static_cast<uint32_t>(sequence_a_.length - SEQUENCE_LENGTH_MIN)) * 255u)
 		/ static_cast<uint32_t>(SEQUENCE_LENGTH_MAX - SEQUENCE_LENGTH_MIN)
 	);
-	length_cfg.mode = brain::ui::PotMode::kValueScale;
+	length_cfg.mode = PotMode::kValueScale;
 	length_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(length_cfg);
 }
@@ -811,8 +813,8 @@ void SequencerEngine::refresh_output_after_root_change() {
 	const float output_voltage_a = pitch_q8_to_voltage(output_pitch_q8_a);
 	const float output_voltage_b = pitch_q8_to_voltage(output_pitch_q8_b);
 
-	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
-	write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
+	write_pitch_voltage(AudioCvOutChannel::kChannelA, output_voltage_a);
+	write_pitch_voltage(AudioCvOutChannel::kChannelB, output_voltage_b);
 	last_raw_voltage_ = pitch_q8_to_voltage(scaled_pitch_q8_a);
 	last_quantized_voltage_ = output_voltage_a;
 }
@@ -945,7 +947,7 @@ void SequencerEngine::show_active_pot_overlay(uint8_t pot_index) {
 		const uint8_t brightness = is_power_of_two_sequence_length(sequence_a_.length)
 			? 255u
 			: POT_LED_SOFT_BRIGHTNESS;
-		for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+		for (uint8_t i = 0; i < NO_OF_LEDS; ++i) {
 			if (i < led_count) {
 				leds_.set_brightness(i, brightness);
 			} else {
@@ -971,7 +973,7 @@ void SequencerEngine::show_transpose_overlay() {
 	const uint8_t full_count = FULL_LED_COUNT[note];
 	const int8_t dim_index = DIM_LED_INDEX[note];
 
-	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+	for (uint8_t i = 0; i < NO_OF_LEDS; ++i) {
 		if (i < full_count) {
 			leds_.set_brightness(i, 255u);
 		} else {
@@ -979,14 +981,14 @@ void SequencerEngine::show_transpose_overlay() {
 		}
 	}
 
-	if (dim_index >= 0 && dim_index < static_cast<int8_t>(brain::ui::NO_OF_LEDS)) {
+	if (dim_index >= 0 && dim_index < static_cast<int8_t>(NO_OF_LEDS)) {
 		leds_.set_brightness(static_cast<uint8_t>(dim_index), POT_LED_SOFT_BRIGHTNESS);
 	}
 }
 
 void SequencerEngine::show_octave_transpose_overlay() {
 	const uint8_t lit_count = static_cast<uint8_t>(octave_transpose_ + 1u);
-	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+	for (uint8_t i = 0; i < NO_OF_LEDS; ++i) {
 		if (i < lit_count) {
 			leds_.set_brightness(i, 255u);
 		} else {
@@ -1044,8 +1046,8 @@ uint8_t SequencerEngine::active_pot_led_mask(uint8_t pot_index) const {
 	// In shift+pot2 (quantization selection), show one-hot LED index 1..6.
 	if (shift_active_ && pot_index == POT_INDEX_RANGE_OR_QUANTIZATION) {
 		uint8_t mode_index = static_cast<uint8_t>(quantization_mode_);
-		if (mode_index >= brain::ui::NO_OF_LEDS) {
-			mode_index = brain::ui::NO_OF_LEDS - 1;
+		if (mode_index >= NO_OF_LEDS) {
+			mode_index = NO_OF_LEDS - 1;
 		}
 		return static_cast<uint8_t>(1u << mode_index);
 	}
@@ -1058,13 +1060,13 @@ uint8_t SequencerEngine::percent_to_led_mask(uint8_t percent_255) const {
 		return 0;
 	}
 	uint8_t lit_count = static_cast<uint8_t>(
-		(static_cast<uint32_t>(percent_255) * brain::ui::NO_OF_LEDS + 127u) / 255u
+		(static_cast<uint32_t>(percent_255) * NO_OF_LEDS + 127u) / 255u
 	);
 	if (lit_count == 0) {
 		lit_count = 1;
 	}
-	if (lit_count > brain::ui::NO_OF_LEDS) {
-		lit_count = brain::ui::NO_OF_LEDS;
+	if (lit_count > NO_OF_LEDS) {
+		lit_count = NO_OF_LEDS;
 	}
 
 	uint8_t mask = 0;
@@ -1083,10 +1085,10 @@ void SequencerEngine::reset_gate_history() {
 }
 
 void SequencerEngine::push_gate_history(bool gate_high) {
-	for (uint8_t i = 0; i < (brain::ui::NO_OF_LEDS - 1); ++i) {
+	for (uint8_t i = 0; i < (NO_OF_LEDS - 1); ++i) {
 		gate_history_fifo_[i] = gate_history_fifo_[i + 1];
 	}
-	gate_history_fifo_[brain::ui::NO_OF_LEDS - 1] = gate_high ? 1 : 0;
+	gate_history_fifo_[NO_OF_LEDS - 1] = gate_high ? 1 : 0;
 	refresh_gate_history_view();
 	if (!pot_led_overlay_active_) {
 		leds_.set_from_mask(gate_history_mask());
@@ -1094,15 +1096,15 @@ void SequencerEngine::push_gate_history(bool gate_high) {
 }
 
 void SequencerEngine::refresh_gate_history_view() {
-	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+	for (uint8_t i = 0; i < NO_OF_LEDS; ++i) {
 		gate_history_text_[i] = gate_history_fifo_[i] ? '1' : '0';
 	}
-	gate_history_text_[brain::ui::NO_OF_LEDS] = '\0';
+	gate_history_text_[NO_OF_LEDS] = '\0';
 }
 
 uint8_t SequencerEngine::gate_history_mask() const {
 	uint8_t mask = 0;
-	for (uint8_t i = 0; i < brain::ui::NO_OF_LEDS; ++i) {
+	for (uint8_t i = 0; i < NO_OF_LEDS; ++i) {
 		if (gate_history_fifo_[i] != 0) {
 			mask |= static_cast<uint8_t>(1u << i);
 		}
@@ -1110,12 +1112,15 @@ uint8_t SequencerEngine::gate_history_mask() const {
 	return mask;
 }
 
-void SequencerEngine::write_pitch_voltage(brain::io::AudioCvOutChannel channel, float voltage) {
+void SequencerEngine::write_pitch_voltage(AudioCvOutChannel channel, float voltage) {
+	const float mv_float = voltage * 1000.0f;
+	const int32_t millivolts = static_cast<int32_t>(mv_float >= 0.0f ? (mv_float + 0.5f) : (mv_float - 0.5f));
+
 	if (calibrated_output_enabled_) {
-		dac_.set_voltage_calibrated(channel, voltage);
+		dac_.set_voltage_calibrated_millivolts(channel, millivolts);
 		return;
 	}
-	dac_.set_voltage(channel, voltage);
+	dac_.set_voltage_millivolts(channel, millivolts);
 }
 
 void SequencerEngine::tick(uint64_t now_us) {
@@ -1131,21 +1136,21 @@ void SequencerEngine::tick(uint64_t now_us) {
 	const float output_voltage_b = pitch_q8_to_voltage(output_pitch_q8_b);
 
 	if (step_a.gate) {
-		write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelA, output_voltage_a);
-		write_pitch_voltage(brain::io::AudioCvOutChannel::kChannelB, output_voltage_b);
+		write_pitch_voltage(AudioCvOutChannel::kChannelA, output_voltage_a);
+		write_pitch_voltage(AudioCvOutChannel::kChannelB, output_voltage_b);
 		last_raw_voltage_ = pitch_q8_to_voltage(scaled_pitch_q8_a);
 		last_quantized_voltage_ = output_voltage_a;
-		gate_.set(true);
+		dac_.pulse_set(true);
 		gate_active_ = true;
 		gate_off_time_us_ = now_us + GATE_PULSE_US;
 	} else {
-		gate_.set(false);
+		dac_.pulse_set(false);
 		gate_active_ = false;
 	}
 	push_gate_history(step_a.gate);
 
 	if ((tick_counter_ % STEPS_PER_QUARTER_NOTE) == 0) {
-		button_led_.blink_duration(BUTTON_LED_BLINK_MS, BUTTON_LED_BLINK_INTERVAL_MS);
+		leds_.button_blink_duration(BUTTON_LED_BLINK_MS, BUTTON_LED_BLINK_INTERVAL_MS);
 	}
 
 	tick_counter_++;
@@ -1161,13 +1166,13 @@ void SequencerEngine::reset_transport() {
 	gate_active_ = false;
 	tick_counter_ = 0;
 	current_step_interval_us_ = tick_interval_us_;
-	gate_.set(false);
+	dac_.pulse_set(false);
 	pot_led_overlay_active_ = false;
 	pot_led_overlay_last_change_us_ = 0;
 	last_pot_raw_values_ = pot_raw_values_;
 	root_edit_octave_pot_reference_raw_ = pot_raw_values_[POT_INDEX_RANGE_OR_QUANTIZATION];
 	root_edit_note_pot_reference_raw_ = pot_raw_values_[POT_INDEX_RANDOMNESS_OR_LENGTH];
-	last_pulse_in_high_ = gate_.read();
+	last_pulse_in_high_ = pulse_input_.pulse_read();
 	last_external_tick_us_ = 0;
 	external_interval_us_ = tick_interval_us_;
 	last_midi_clock_tick_us_ = 0;
@@ -1178,7 +1183,7 @@ void SequencerEngine::reset_transport() {
 	external_clock_source_ = ExternalClockSource::kInternal;
 	clear_external_swing_pending();
 	reset_gate_history();
-	button_led_.off();
+	leds_.button_off();
 }
 
 uint32_t SequencerEngine::compute_swing_delta_us(uint32_t base_interval_us) const {

@@ -4,12 +4,10 @@
 #include <array>
 #include <cstdint>
 
-#include "brain-io/audio-cv-out.h"
-#include "brain-io/pulse.h"
-#include "brain-ui/button-led.h"
-#include "brain-ui/leds.h"
-#include "brain-ui/pot-multi-function.h"
-#include "brain-ui/pots.h"
+#include "brain/include/inputs.h"
+#include "brain/include/leds.h"
+#include "brain/include/outputs.h"
+#include "brain/include/pots.h"
 
 struct Step {
 	uint16_t pitch_q8;
@@ -123,12 +121,11 @@ private:
 
 	Sequence sequence_a_;
 	std::array<Step, Sequence::kMaxSteps> sequence_b_steps_;
-	brain::ui::Pots pots_;
-	brain::ui::PotMultiFunction pot_multi_function_;
-	brain::io::AudioCvOut dac_;
-	brain::io::Pulse gate_;
-	brain::ui::Leds leds_;
-	brain::ui::ButtonLed button_led_;
+	Pots pots_;
+	PotMultiFunction pot_multi_function_;
+	Outputs dac_;
+	Inputs pulse_input_;
+	Leds leds_;
 	bool calibrated_output_enabled_;
 
 	bool initialized_;
@@ -174,8 +171,8 @@ private:
 	uint64_t pot_led_overlay_last_change_us_;
 	std::array<uint8_t, NUM_POTS> pot_raw_values_;
 	std::array<uint8_t, NUM_POTS> last_pot_raw_values_;
-	std::array<uint8_t, brain::ui::NO_OF_LEDS> gate_history_fifo_;
-	char gate_history_text_[brain::ui::NO_OF_LEDS + 1];
+	std::array<uint8_t, NO_OF_LEDS> gate_history_fifo_;
+	char gate_history_text_[NO_OF_LEDS + 1];
 	uint32_t rng_state_a_;
 	uint32_t rng_state_b_;
 
@@ -209,7 +206,7 @@ private:
 	void push_gate_history(bool gate_high);
 	void refresh_gate_history_view();
 	uint8_t gate_history_mask() const;
-	void write_pitch_voltage(brain::io::AudioCvOutChannel channel, float voltage);
+	void write_pitch_voltage(AudioCvOutChannel channel, float voltage);
 	void tick(uint64_t now_us);
 	void update_external_clock_source(uint64_t now_us);
 	void handle_external_pulse_edge(uint64_t now_us);

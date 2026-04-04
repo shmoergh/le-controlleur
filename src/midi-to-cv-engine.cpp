@@ -2,7 +2,7 @@
 #include "debug-log.h"
 #include "settings-storage.h"
 
-MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel) :
+MidiToCVEngine::MidiToCVEngine(AudioCvOutChannel cv_channel, uint8_t midi_channel) :
 	pots_(),
 	leds_(true)
 {
@@ -38,7 +38,7 @@ MidiToCVEngine::MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t 
 	mode_pickup_armed_ = false;
 
 	// Pots setup
-	brain::ui::PotsConfig pots_config = brain::ui::create_default_config();
+	PotsConfig pots_config = create_default_pots_config();
 	pots_config.simple = true;
 	pots_config.output_resolution = 8;
 	pots_.init(pots_config);
@@ -102,7 +102,7 @@ void MidiToCVEngine::update() {
 
 			update_cv_channel_setting();
 			uint8_t cv_led_mask = 0b000000;
-			if (cv_channel_ == brain::io::AudioCvOutChannel::kChannelA) {
+			if (cv_channel_ == AudioCvOutChannel::kChannelA) {
 				cv_led_mask = LED_MASK_CHANNEL_A;
 			} else {
 				cv_led_mask = LED_MASK_CHANNEL_B;
@@ -184,12 +184,12 @@ void MidiToCVEngine::init_pot_functions() {
 		clamp(0, 255, static_cast<int32_t>((midi_channel_ - 1) * 16 + 8))
 	);
 	const uint8_t initial_cv_channel_value =
-		(cv_channel_ == brain::io::AudioCvOutChannel::kChannelA) ? 63u : 191u;
+		(cv_channel_ == AudioCvOutChannel::kChannelA) ? 63u : 191u;
 	const uint8_t initial_mode_value = static_cast<uint8_t>(
 		clamp(0, 255, static_cast<int32_t>(static_cast<uint8_t>(mode_) * 64 + 32))
 	);
 
-	brain::ui::PotFunctionConfig midi_channel_cfg;
+	PotFunctionConfig midi_channel_cfg;
 	midi_channel_cfg.function_id = POT_FUNCTION_ID_MIDI_CHANNEL;
 	midi_channel_cfg.pot_index = POT_MIDI_CHANNEL;
 	midi_channel_cfg.min_value = 0;
@@ -199,7 +199,7 @@ void MidiToCVEngine::init_pot_functions() {
 	midi_channel_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(midi_channel_cfg);
 
-	brain::ui::PotFunctionConfig cv_channel_cfg;
+	PotFunctionConfig cv_channel_cfg;
 	cv_channel_cfg.function_id = POT_FUNCTION_ID_CV_CHANNEL;
 	cv_channel_cfg.pot_index = POT_CV_CHANNEL;
 	cv_channel_cfg.min_value = 0;
@@ -209,7 +209,7 @@ void MidiToCVEngine::init_pot_functions() {
 	cv_channel_cfg.pickup_hysteresis = POT_FUNCTION_PICKUP_HYSTERESIS;
 	pot_multi_function_.register_function(cv_channel_cfg);
 
-	brain::ui::PotFunctionConfig mode_cfg;
+	PotFunctionConfig mode_cfg;
 	mode_cfg.function_id = POT_FUNCTION_ID_MODE;
 	mode_cfg.pot_index = POT_MODE;
 	mode_cfg.min_value = 0;
@@ -255,9 +255,9 @@ void MidiToCVEngine::update_cv_channel_setting() {
 	uint8_t pot_b_value = pot_multi_function_.get_value(POT_FUNCTION_ID_CV_CHANNEL);
 
 	if (pot_b_value < POT_CV_CHANNEL_THRESHOLD) {
-		cv_channel_ = brain::io::AudioCvOutChannel::kChannelA;
+		cv_channel_ = AudioCvOutChannel::kChannelA;
 	} else {
-		cv_channel_ = brain::io::AudioCvOutChannel::kChannelB;
+		cv_channel_ = AudioCvOutChannel::kChannelB;
 	}
 }
 
@@ -290,15 +290,15 @@ void MidiToCVEngine::load_settings() {
 	uint8_t persisted_cv_channel = 0;
 	if (load_persisted_midi_cv_channel(persisted_cv_channel) && persisted_cv_channel <= 1u) {
 		cv_channel_ = (persisted_cv_channel == 0u)
-			? brain::io::AudioCvOutChannel::kChannelA
-			: brain::io::AudioCvOutChannel::kChannelB;
+			? AudioCvOutChannel::kChannelA
+			: AudioCvOutChannel::kChannelB;
 		has_persisted_cv_channel_ = true;
 		persisted_cv_channel_ = persisted_cv_channel;
 	} else {
 		uint8_t pot_b_value = pots_.get(POT_CV_CHANNEL);
 		cv_channel_ = (pot_b_value < POT_CV_CHANNEL_THRESHOLD)
-			? brain::io::AudioCvOutChannel::kChannelA
-			: brain::io::AudioCvOutChannel::kChannelB;
+			? AudioCvOutChannel::kChannelA
+			: AudioCvOutChannel::kChannelB;
 		has_persisted_cv_channel_ = false;
 		persisted_cv_channel_ = 0;
 	}
@@ -332,7 +332,7 @@ void MidiToCVEngine::persist_midi_channel_if_needed() {
 }
 
 void MidiToCVEngine::persist_cv_settings_if_needed() {
-	const uint8_t cv_channel_to_persist = (cv_channel_ == brain::io::AudioCvOutChannel::kChannelA) ? 0u : 1u;
+	const uint8_t cv_channel_to_persist = (cv_channel_ == AudioCvOutChannel::kChannelA) ? 0u : 1u;
 	const uint8_t mode_to_persist = static_cast<uint8_t>(mode_);
 
 	const bool cv_channel_changed = !has_persisted_cv_channel_ || persisted_cv_channel_ != cv_channel_to_persist;

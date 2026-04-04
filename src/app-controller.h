@@ -3,9 +3,9 @@
 
 #include <pico/stdlib.h>
 
-#include "brain-common/brain-gpio-setup.h"
-#include "brain-io/midi-parser.h"
-#include "brain-ui/button.h"
+#include "brain/include/button.h"
+#include "brain/include/gpio-setup.h"
+#include "brain/include/midi-parser.h"
 #include "midi-to-cv-engine.h"
 #include "sequencer-engine.h"
 
@@ -26,12 +26,12 @@ public:
 	AppMode mode() const;
 
 private:
-	brain::ui::Button button_a_;
-	brain::ui::Button button_b_;
+	Button button_a_;
+	Button button_b_;
 	AppMode mode_;
 	MidiToCVEngine midi_to_cv_engine_;
 	SequencerEngine sequencer_engine_;
-	brain::io::MidiParser sequencer_midi_parser_;
+	MidiParser sequencer_midi_parser_;
 	bool sequencer_midi_parser_initialized_;
 	bool button_a_pressed_;
 	bool button_b_pressed_;

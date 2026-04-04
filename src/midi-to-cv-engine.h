@@ -3,18 +3,13 @@
 
 #include <vector>
 
-#include "brain-common/brain-gpio-setup.h"
-#include "brain-utils/midi-to-cv.h"
-#include "brain-ui/leds.h"
-#include "brain-ui/pot-multi-function.h"
-#include "brain-ui/pots.h"
-#include "brain-utils/helpers.h"
+#include "brain/include/gpio-setup.h"
+#include "brain/include/helpers.h"
+#include "brain/include/leds.h"
+#include "brain/include/midi-to-cv.h"
+#include "brain/include/pots.h"
 
 using brain::utils::MidiToCV;
-using brain::ui::Leds;
-using brain::ui::PotMultiFunction;
-using brain::ui::PotMode;
-using brain::ui::Pots;
 
 constexpr uint8_t POT_CV_CHANNEL_THRESHOLD = 127;
 constexpr uint8_t LED_MASK_CHANNEL_A 		= 0b000001;
@@ -44,7 +39,7 @@ enum State {
 class MidiToCVEngine : public MidiToCV
 {
 public:
-	MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
+	MidiToCVEngine(AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
 	void panic();
 	void play_startup_animation();
@@ -61,7 +56,7 @@ private:
 	Leds leds_;
 
 	uint8_t midi_channel_;
-	brain::io::AudioCvOutChannel cv_channel_;
+	AudioCvOutChannel cv_channel_;
 	MidiToCV::Mode mode_;
 	State state_;
 	uint8_t key_pressed_;

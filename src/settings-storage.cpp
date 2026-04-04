@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "brain-storage/storage.h"
+#include "brain/include/storage.h"
 
 namespace {
 
@@ -205,40 +205,55 @@ bool load_v1(const PersistedSettingsV1& flash_settings, PersistedSettingsV4& out
 }
 
 bool load_settings(PersistedSettingsV4& out_settings) {
-	uint8_t blob[brain::storage::layout::kAppDataRegionSizeBytes];
+	uint8_t blob[StorageLayout::kAppDataRegionSizeBytes];
 	size_t actual_size = 0;
-	const brain::storage::StorageStatus status =
-		brain::storage::read_app_blob(blob, sizeof(blob), &actual_size);
+	const StorageStatus status = read_app_blob(blob, sizeof(blob), &actual_size);
 
-	if (status != brain::storage::StorageStatus::kOk || actual_size == 0) {
+	if (status != StorageStatus::kOk || actual_size == 0) {
 		return false;
 	}
 
-	if (actual_size == sizeof(PersistedSettingsV4)) {
-		PersistedSettingsV4 stored{};
-		memcpy(&stored, blob, sizeof(stored));
-		return load_v4(stored, out_settings);
+	if (actual_size < (sizeof(uint32_t) + sizeof(uint8_t))) {
+		return false;
 	}
 
-	if (actual_size == sizeof(PersistedSettingsV3)) {
-		PersistedSettingsV3 stored{};
-		memcpy(&stored, blob, sizeof(stored));
-		return load_v3(stored, out_settings);
+	const uint8_t version = blob[sizeof(uint32_t)];
+	switch (version) {
+		case SETTINGS_VERSION_V4: {
+			if (actual_size != sizeof(PersistedSettingsV4)) {
+				return false;
+			}
+			PersistedSettingsV4 stored{};
+			memcpy(&stored, blob, sizeof(stored));
+			return load_v4(stored, out_settings);
+		}
+		case SETTINGS_VERSION_V3: {
+			if (actual_size != sizeof(PersistedSettingsV3)) {
+				return false;
+			}
+			PersistedSettingsV3 stored{};
+			memcpy(&stored, blob, sizeof(stored));
+			return load_v3(stored, out_settings);
+		}
+		case SETTINGS_VERSION_V2: {
+			if (actual_size != sizeof(PersistedSettingsV2)) {
+				return false;
+			}
+			PersistedSettingsV2 stored{};
+			memcpy(&stored, blob, sizeof(stored));
+			return load_v2(stored, out_settings);
+		}
+		case SETTINGS_VERSION_V1: {
+			if (actual_size != sizeof(PersistedSettingsV1)) {
+				return false;
+			}
+			PersistedSettingsV1 stored{};
+			memcpy(&stored, blob, sizeof(stored));
+			return load_v1(stored, out_settings);
+		}
+		default:
+			return false;
 	}
-
-	if (actual_size == sizeof(PersistedSettingsV2)) {
-		PersistedSettingsV2 stored{};
-		memcpy(&stored, blob, sizeof(stored));
-		return load_v2(stored, out_settings);
-	}
-
-	if (actual_size == sizeof(PersistedSettingsV1)) {
-		PersistedSettingsV1 stored{};
-		memcpy(&stored, blob, sizeof(stored));
-		return load_v1(stored, out_settings);
-	}
-
-	return false;
 }
 
 void ensure_shadow_loaded() {
@@ -258,9 +273,8 @@ bool write_settings(const PersistedSettingsV4& settings) {
 	to_write.version = SETTINGS_VERSION_V4;
 	to_write.checksum = checksum32(to_write);
 
-	const brain::storage::StorageStatus status =
-		brain::storage::write_app_blob(&to_write, sizeof(to_write));
-	if (status != brain::storage::StorageStatus::kOk) {
+	const StorageStatus status = write_app_blob(&to_write, sizeof(to_write));
+	if (status != StorageStatus::kOk) {
 		return false;
 	}
 

@@ -14,7 +14,7 @@ AppController::AppController() :
 	button_a_(GPIO_BRAIN_BUTTON_1),
 	button_b_(GPIO_BRAIN_BUTTON_2),
 	mode_(AppMode::kMidiToCv),
-	midi_to_cv_engine_(brain::io::AudioCvOutChannel::kChannelB, 1),
+	midi_to_cv_engine_(AudioCvOutChannel::kChannelB, 1),
 	sequencer_midi_parser_(1, false),
 	sequencer_midi_parser_initialized_(false),
 	button_a_pressed_(false),
