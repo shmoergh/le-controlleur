@@ -3,18 +3,15 @@
 
 #include <vector>
 
-#include "brain-common/brain-gpio-setup.h"
-#include "brain-utils/midi-to-cv.h"
-#include "brain-ui/leds.h"
-#include "brain-ui/pot-multi-function.h"
-#include "brain-ui/pots.h"
-#include "brain-utils/helpers.h"
+#include "brain/include/gpio-setup.h"
+#include "brain/include/helpers.h"
+#include "brain/include/leds.h"
+#include "brain/include/midi-to-cv.h"
+#include "brain/include/pots.h"
 
 using brain::utils::MidiToCV;
-using brain::ui::Leds;
-using brain::ui::PotMultiFunction;
-using brain::ui::PotMode;
-using brain::ui::Pots;
+
+class Brain;
 
 constexpr uint8_t POT_CV_CHANNEL_THRESHOLD = 127;
 constexpr uint8_t LED_MASK_CHANNEL_A 		= 0b000001;
@@ -41,27 +38,27 @@ enum State {
 	kSetCVChannel = 2
 };
 
-class MidiToCVEngine : public MidiToCV
+class MidiToCVEngine
 {
 public:
-	MidiToCVEngine(brain::io::AudioCvOutChannel cv_channel, uint8_t midi_channel);
+	MidiToCVEngine(Brain& brain, AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
 	void panic();
 	void play_startup_animation();
+	void on_mode_enter();
 	void on_button_a_press();
 	void on_button_a_release();
 	void on_button_b_press();
 	void on_button_b_release();
 	State get_state() const;
 	uint8_t get_midi_channel() const;
+	bool is_note_playing();
 
 private:
-	Pots pots_;
-	PotMultiFunction pot_multi_function_;
-	Leds leds_;
+	Brain& brain_;
 
 	uint8_t midi_channel_;
-	brain::io::AudioCvOutChannel cv_channel_;
+	AudioCvOutChannel cv_channel_;
 	MidiToCV::Mode mode_;
 	State state_;
 	uint8_t key_pressed_;
@@ -89,6 +86,7 @@ private:
 	void update_midi_channel_setting();
 	void update_cv_channel_setting();
 	void update_cc_setting();
+	bool apply_pot_profile();
 	void load_settings();
 	void persist_midi_channel_if_needed();
 	void persist_cv_settings_if_needed();

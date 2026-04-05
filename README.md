@@ -38,7 +38,7 @@ This project includes brain-sdk as a git submodule. To update the SDK:
 
 ```bash
 cd brain-sdk
-git pull origin main
+git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)"
 cd ..
 git add brain-sdk
 git commit -m "Update brain-sdk"
