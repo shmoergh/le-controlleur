@@ -49,7 +49,7 @@ AppController::AppController() :
 	sequencer_midi_parser_.set_channel(midi_to_cv_engine_.get_midi_channel());
 
 	uint8_t persisted_mode = static_cast<uint8_t>(AppMode::kMidiToCv);
-	if (load_persisted_app_mode(persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
+	if (load_persisted_app_mode(brain_.storage, persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
 		mode_ = AppMode::kSequencer;
 		ensure_sequencer_midi_parser_initialized();
 		sequencer_midi_parser_.reset();
@@ -86,7 +86,7 @@ void AppController::update() {
 			allow_settings_commit = !sequencer_engine_.is_playing();
 			break;
 	}
-	if (!service_persisted_settings(allow_settings_commit)) {
+	if (!service_persisted_settings(brain_.storage, allow_settings_commit)) {
 		LOG_ERROR("APP", "deferred settings commit failed");
 	}
 
@@ -553,7 +553,7 @@ void AppController::set_mode(AppMode mode) {
 		midi_to_cv_engine_.on_mode_enter();
 	}
 
-	save_persisted_app_mode(static_cast<uint8_t>(mode_));
+	save_persisted_app_mode(brain_.storage, static_cast<uint8_t>(mode_));
 
 	if (!entering_sequencer) {
 		midi_to_cv_engine_.play_startup_animation();

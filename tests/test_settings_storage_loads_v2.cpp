@@ -7,35 +7,36 @@
 
 int main() {
 	storage_mock::reset();
+	Storage storage;
 
+	// Legacy payload format should now be treated as unsupported.
 	TestPersistedSettingsV2 v2{};
-	v2.magic = kSettingsMagic;
 	v2.version = 2u;
 	v2.midi_channel = 14u;
 	v2.app_mode = 0u;
 	v2.reserved[0] = 0u;
-	v2.checksum = test_checksum32(v2);
+	v2.checksum = 0u;
 
 	storage_mock::set_read_blob(&v2, sizeof(v2));
 
 	uint8_t value = 0;
 
-	assert(load_persisted_midi_channel(value));
-	assert(value == 14u);
+	assert(load_persisted_midi_channel(storage, value));
+	assert(value == 1u);
 
-	assert(load_persisted_app_mode(value));
+	assert(load_persisted_app_mode(storage, value));
+	assert(value == 1u);
+
+	assert(load_persisted_root_note(storage, value));
 	assert(value == 0u);
 
-	assert(load_persisted_root_note(value));
+	assert(load_persisted_midi_cv_channel(storage, value));
+	assert(value == 1u);
+
+	assert(load_persisted_midi_mode(storage, value));
 	assert(value == 0u);
 
-	assert(load_persisted_midi_cv_channel(value));
-	assert(value == 0xFFu);
-
-	assert(load_persisted_midi_mode(value));
-	assert(value == 0xFFu);
-
-	assert(service_persisted_settings(true));
+	assert(service_persisted_settings(storage, true));
 	assert(storage_mock::write_count() == 0u);
 
 	return 0;

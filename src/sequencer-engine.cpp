@@ -845,7 +845,7 @@ void SequencerEngine::persist_root_note_if_needed() {
 		return;
 	}
 
-	if (save_persisted_root_note(root_note_)) {
+	if (save_persisted_root_note(brain_.storage, root_note_)) {
 		has_persisted_root_note_ = true;
 		persisted_root_note_ = root_note_;
 		return;

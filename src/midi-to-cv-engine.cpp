@@ -14,6 +14,9 @@ MidiToCVEngine::MidiToCVEngine(Brain& brain, AudioCvOutChannel cv_channel, uint8
 	if (!brain_init_succeeded(brain_.init_midi_to_cv(cv_channel, midi_channel))) {
 		LOG_ERROR("M2CV", "failed to init midi_to_cv utility");
 	}
+	if (!brain_init_succeeded(brain_.init_storage())) {
+		LOG_ERROR("M2CV", "failed to init storage component");
+	}
 
 	brain_.midi_to_cv.set_max_cc_voltage(5);
 	if (!brain_.midi_to_cv.enable_calibrated_output(true)) {
@@ -305,7 +308,7 @@ bool MidiToCVEngine::apply_pot_profile() {
 
 void MidiToCVEngine::load_settings() {
 	uint8_t persisted_channel = 0;
-	if (load_persisted_midi_channel(persisted_channel) && persisted_channel >= 1 && persisted_channel <= 16) {
+	if (load_persisted_midi_channel(brain_.storage, persisted_channel) && persisted_channel >= 1 && persisted_channel <= 16) {
 		midi_channel_ = persisted_channel;
 		has_persisted_midi_channel_ = true;
 		persisted_midi_channel_ = persisted_channel;
@@ -319,7 +322,7 @@ void MidiToCVEngine::load_settings() {
 	brain_.midi_to_cv.set_midi_channel(midi_channel_);
 
 	uint8_t persisted_cv_channel = 0;
-	if (load_persisted_midi_cv_channel(persisted_cv_channel) && persisted_cv_channel <= 1u) {
+	if (load_persisted_midi_cv_channel(brain_.storage, persisted_cv_channel) && persisted_cv_channel <= 1u) {
 		cv_channel_ = (persisted_cv_channel == 0u)
 			? AudioCvOutChannel::kChannelA
 			: AudioCvOutChannel::kChannelB;
@@ -336,7 +339,7 @@ void MidiToCVEngine::load_settings() {
 	brain_.midi_to_cv.set_pitch_channel(cv_channel_);
 
 	uint8_t persisted_mode = static_cast<uint8_t>(MidiToCV::Mode::kDefault);
-	if (load_persisted_midi_mode(persisted_mode) && persisted_mode <= static_cast<uint8_t>(MidiToCV::Mode::kDuo)) {
+	if (load_persisted_midi_mode(brain_.storage, persisted_mode) && persisted_mode <= static_cast<uint8_t>(MidiToCV::Mode::kDuo)) {
 		mode_ = MidiToCV::Mode(persisted_mode);
 		has_persisted_mode_ = true;
 		persisted_mode_ = persisted_mode;
@@ -354,7 +357,7 @@ void MidiToCVEngine::persist_midi_channel_if_needed() {
 		return;
 	}
 
-	if (save_persisted_midi_channel(midi_channel_)) {
+	if (save_persisted_midi_channel(brain_.storage, midi_channel_)) {
 		has_persisted_midi_channel_ = true;
 		persisted_midi_channel_ = midi_channel_;
 	} else {
@@ -373,7 +376,7 @@ void MidiToCVEngine::persist_cv_settings_if_needed() {
 	}
 
 	if (cv_channel_changed) {
-		if (save_persisted_midi_cv_channel(cv_channel_to_persist)) {
+		if (save_persisted_midi_cv_channel(brain_.storage, cv_channel_to_persist)) {
 			has_persisted_cv_channel_ = true;
 			persisted_cv_channel_ = cv_channel_to_persist;
 		} else {
@@ -382,7 +385,7 @@ void MidiToCVEngine::persist_cv_settings_if_needed() {
 	}
 
 	if (mode_changed) {
-		if (save_persisted_midi_mode(mode_to_persist)) {
+		if (save_persisted_midi_mode(brain_.storage, mode_to_persist)) {
 			has_persisted_mode_ = true;
 			persisted_mode_ = mode_to_persist;
 		} else {

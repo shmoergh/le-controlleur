@@ -6,7 +6,7 @@
 #include <cstring>
 #include <vector>
 
-constexpr uint32_t kSettingsMagic = 0x4C435452;  // "LCTR"
+constexpr uint8_t kSettingsSchemaVersion = 1u;
 
 struct TestPersistedSettingsV1 {
 	uint32_t magic;
@@ -25,38 +25,14 @@ struct TestPersistedSettingsV2 {
 	uint32_t checksum;
 };
 
-struct TestPersistedSettingsV3 {
-	uint32_t magic;
-	uint8_t version;
-	uint8_t midi_channel;
-	uint8_t app_mode;
-	uint8_t root_note;
-	uint32_t checksum;
-};
-
-struct TestPersistedSettingsV4 {
-	uint32_t magic;
-	uint8_t version;
+struct TestPersistedSettingsCurrent {
+	uint8_t schema_version;
 	uint8_t midi_channel;
 	uint8_t app_mode;
 	uint8_t root_note;
 	uint8_t midi_cv_channel;
 	uint8_t midi_mode;
-	uint32_t checksum;
 };
-
-template <typename TSettings>
-uint32_t test_checksum32(const TSettings& settings_without_checksum) {
-	const auto* bytes = reinterpret_cast<const uint8_t*>(&settings_without_checksum);
-	const size_t length = sizeof(TSettings) - sizeof(settings_without_checksum.checksum);
-
-	uint32_t hash = 2166136261u;
-	for (size_t i = 0; i < length; ++i) {
-		hash ^= bytes[i];
-		hash *= 16777619u;
-	}
-	return hash;
-}
 
 template <typename TSettings>
 TSettings decode_settings_blob(const std::vector<uint8_t>& blob) {

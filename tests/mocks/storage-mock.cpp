@@ -1,6 +1,5 @@
 #include "storage-mock.h"
 
-#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -81,4 +80,82 @@ StorageStatus write_app_blob(const void* data, std::size_t size) {
 	g_state.read_status = StorageStatus::kOk;
 	++g_state.write_count;
 	return StorageStatus::kOk;
+}
+
+bool Storage::init(bool require_protected_layout) {
+	require_protected_layout_ = require_protected_layout;
+	initialized_ = true;
+	return true;
+}
+
+bool Storage::is_initialized() const {
+	return initialized_;
+}
+
+bool Storage::is_layout_protected() const {
+	return true;
+}
+
+uint32_t Storage::region_offset(StorageRegion region) const {
+	(void)region;
+	return 0u;
+}
+
+size_t Storage::region_size(StorageRegion region) const {
+	(void)region;
+	return 0u;
+}
+
+StorageStatus Storage::read_region(StorageRegion region, uint32_t offset, void* out, size_t size) const {
+	(void)region;
+	(void)offset;
+	(void)out;
+	(void)size;
+	return StorageStatus::kNotPermitted;
+}
+
+StorageStatus Storage::write_region(StorageRegion region, uint32_t offset, const void* data, size_t size) const {
+	(void)region;
+	(void)offset;
+	(void)data;
+	(void)size;
+	return StorageStatus::kNotPermitted;
+}
+
+StorageStatus Storage::erase_region(StorageRegion region) const {
+	(void)region;
+	return StorageStatus::kNotPermitted;
+}
+
+StorageStatus Storage::read_cv_calibration(CvCalibrationV1* out) const {
+	(void)out;
+	return StorageStatus::kNotPermitted;
+}
+
+StorageStatus Storage::write_cv_calibration(const CvCalibrationV1* in) const {
+	(void)in;
+	return StorageStatus::kNotPermitted;
+}
+
+StorageStatus Storage::clear_cv_calibration() const {
+	return StorageStatus::kNotPermitted;
+}
+
+StorageStatus Storage::read_app_blob(void* out, size_t max_size, size_t* actual_size) const {
+	return ::read_app_blob(out, max_size, actual_size);
+}
+
+StorageStatus Storage::write_app_blob(const void* data, size_t size) const {
+	return ::write_app_blob(data, size);
+}
+
+StorageStatus Storage::clear_app_blob() const {
+	g_state.persisted_blob.clear();
+	g_state.read_status = StorageStatus::kNotFound;
+	return StorageStatus::kOk;
+}
+
+StorageStatus Storage::check_ready_(bool write_operation) const {
+	(void)write_operation;
+	return initialized_ ? StorageStatus::kOk : StorageStatus::kNotPermitted;
 }
