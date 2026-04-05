@@ -9,6 +9,8 @@
 #include "brain/include/outputs.h"
 #include "brain/include/pots.h"
 
+class Brain;
+
 struct Step {
 	uint16_t pitch_q8;
 	bool gate;
@@ -38,7 +40,7 @@ enum class ExternalClockSource : uint8_t {
 
 class SequencerEngine {
 public:
-	SequencerEngine();
+	explicit SequencerEngine(Brain& brain);
 	void update();
 	void on_mode_enter();
 	void on_mode_exit();
@@ -121,11 +123,7 @@ private:
 
 	Sequence sequence_a_;
 	std::array<Step, Sequence::kMaxSteps> sequence_b_steps_;
-	Pots pots_;
-	PotMultiFunction pot_multi_function_;
-	Outputs dac_;
-	Inputs pulse_input_;
-	Leds leds_;
+	Brain& brain_;
 	bool calibrated_output_enabled_;
 
 	bool initialized_;

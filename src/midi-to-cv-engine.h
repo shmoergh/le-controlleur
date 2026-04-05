@@ -11,6 +11,8 @@
 
 using brain::utils::MidiToCV;
 
+class Brain;
+
 constexpr uint8_t POT_CV_CHANNEL_THRESHOLD = 127;
 constexpr uint8_t LED_MASK_CHANNEL_A 		= 0b000001;
 constexpr uint8_t LED_MASK_CHANNEL_B 		= 0b000010;
@@ -36,24 +38,24 @@ enum State {
 	kSetCVChannel = 2
 };
 
-class MidiToCVEngine : public MidiToCV
+class MidiToCVEngine
 {
 public:
-	MidiToCVEngine(AudioCvOutChannel cv_channel, uint8_t midi_channel);
+	MidiToCVEngine(Brain& brain, AudioCvOutChannel cv_channel, uint8_t midi_channel);
 	void update();
 	void panic();
 	void play_startup_animation();
+	void on_mode_enter();
 	void on_button_a_press();
 	void on_button_a_release();
 	void on_button_b_press();
 	void on_button_b_release();
 	State get_state() const;
 	uint8_t get_midi_channel() const;
+	bool is_note_playing();
 
 private:
-	Pots pots_;
-	PotMultiFunction pot_multi_function_;
-	Leds leds_;
+	Brain& brain_;
 
 	uint8_t midi_channel_;
 	AudioCvOutChannel cv_channel_;

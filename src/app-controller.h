@@ -3,9 +3,7 @@
 
 #include <pico/stdlib.h>
 
-#include "brain/include/button.h"
-#include "brain/include/gpio-setup.h"
-#include "brain/include/midi-parser.h"
+#include "brain/brain.h"
 #include "midi-to-cv-engine.h"
 #include "sequencer-engine.h"
 
@@ -26,11 +24,12 @@ public:
 	AppMode mode() const;
 
 private:
-	Button button_a_;
-	Button button_b_;
+	Brain brain_;
 	AppMode mode_;
 	MidiToCVEngine midi_to_cv_engine_;
 	SequencerEngine sequencer_engine_;
+	// Dedicated parser for sequencer realtime/root-edit so the Brain-owned
+	// midi_to_cv parser callbacks remain untouched in MIDI2CV mode.
 	MidiParser sequencer_midi_parser_;
 	bool sequencer_midi_parser_initialized_;
 	bool button_a_pressed_;
