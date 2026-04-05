@@ -16,8 +16,14 @@ echo ""
 
 cd brain-sdk
 git fetch origin
-git checkout main
-git pull origin main
+
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [[ "$CURRENT_BRANCH" == "HEAD" ]]; then
+  echo "Error: brain-sdk is in detached HEAD state. Check out a branch first."
+  exit 1
+fi
+
+git pull --ff-only origin "$CURRENT_BRANCH"
 cd ..
 
 echo ""
