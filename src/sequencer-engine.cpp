@@ -137,6 +137,12 @@ void SequencerEngine::on_mode_enter() {
 		}
 	}
 
+	// Inputs init configures ADC round-robin for CV channels; re-apply the
+	// sequencer pot profile after init so the pot mux path owns ADC setup.
+	if (!apply_pot_profile()) {
+		return;
+	}
+
 	init_pot_functions();
 
 	// Shared 6-LED bus: sequencer uses PWM for dim overlays.
@@ -497,15 +503,6 @@ void SequencerEngine::init_io() {
 		return;
 	}
 
-	PotsConfig pots_config = create_default_pots_config();
-	// Sequencer reads Pot 1 and Pot 3 continuously; keep mux settling enabled
-	// to avoid cross-channel bleed between adjacent reads.
-	pots_config.simple = false;
-	pots_config.output_resolution = 8;
-	pots_config.settling_delay_us = 150;
-	pots_config.samples_per_read = 3;
-	brain_.pots.init(pots_config);
-
 	calibrated_output_enabled_ = brain_.outputs.load_calibration_from_flash();
 	if (calibrated_output_enabled_) {
 		LOG_INFO("SEQ", "CV calibration loaded from flash");
@@ -552,6 +549,21 @@ void SequencerEngine::init_io() {
 	persisted_root_note_ = 0;
 
 	initialized_ = true;
+}
+
+bool SequencerEngine::apply_pot_profile() {
+	PotsConfig pots_config = create_default_pots_config();
+	// Sequencer reads Pot 1 and Pot 3 continuously; keep mux settling enabled
+	// to avoid cross-channel bleed between adjacent reads.
+	pots_config.simple = false;
+	pots_config.output_resolution = 8;
+	pots_config.settling_delay_us = 150;
+	pots_config.samples_per_read = 3;
+	if (!brain_init_succeeded(brain_.reconfigure_pots(pots_config, true, true))) {
+		LOG_ERROR("SEQ", "failed to apply pots profile");
+		return false;
+	}
+	return true;
 }
 
 void SequencerEngine::init_pot_functions() {

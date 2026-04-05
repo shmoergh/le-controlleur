@@ -86,6 +86,7 @@ private:
 	void update_midi_channel_setting();
 	void update_cv_channel_setting();
 	void update_cc_setting();
+	bool apply_pot_profile();
 	void load_settings();
 	void persist_midi_channel_if_needed();
 	void persist_cv_settings_if_needed();

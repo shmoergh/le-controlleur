@@ -44,21 +44,23 @@ MidiToCVEngine::MidiToCVEngine(Brain& brain, AudioCvOutChannel cv_channel, uint8
 	cv_channel_pickup_armed_ = false;
 	mode_pickup_armed_ = false;
 
-	on_mode_enter();
+	if (!apply_pot_profile()) {
+		return;
+	}
 
 	// Load settings
 	mode_ = MidiToCV::Mode::kDefault;
 	load_settings();
 	init_pot_functions();
+	reset_pot_function_context();
 }
 
 void MidiToCVEngine::on_mode_enter() {
 	// MIDI2CV uses simple digital LED mode and a fast/simple pot scan config.
 	brain_.leds.set_mode(LedMode::kSimple);
-	PotsConfig pots_config = create_default_pots_config();
-	pots_config.simple = true;
-	pots_config.output_resolution = 8;
-	brain_.pots.init(pots_config);
+	if (!apply_pot_profile()) {
+		return;
+	}
 	init_pot_functions();
 	reset_pot_function_context();
 }
@@ -288,6 +290,17 @@ void MidiToCVEngine::update_cc_setting() {
 	if (!brain_.pot_multi.get_changed(POT_FUNCTION_ID_MODE)) return;
 	uint8_t pot_c_value = brain_.pot_multi.get_value(POT_FUNCTION_ID_MODE);
 	mode_ = MidiToCV::Mode((4 * pot_c_value) / 256);
+}
+
+bool MidiToCVEngine::apply_pot_profile() {
+	PotsConfig pots_config = create_default_pots_config();
+	pots_config.simple = true;
+	pots_config.output_resolution = 8;
+	if (!brain_init_succeeded(brain_.reconfigure_pots(pots_config, true, true))) {
+		LOG_ERROR("M2CV", "failed to apply pots profile");
+		return false;
+	}
+	return true;
 }
 
 void MidiToCVEngine::load_settings() {

@@ -176,6 +176,7 @@ private:
 
 	void init_sequence();
 	void init_io();
+	bool apply_pot_profile();
 	void scan_pots_snapshot();
 	void init_pot_functions();
 	void set_active_pot_functions(uint8_t pot_0_function, uint8_t pot_1_function, uint8_t pot_2_function);
