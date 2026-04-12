@@ -47,10 +47,7 @@ add_executable(le_controlleur ${FILES})
 
 target_link_libraries(le_controlleur
 	pico_stdlib
-	brain-common
-	brain-utils
-	brain-ui
-	brain-io)
+	brain)
 
 if(LE_CONTROLLEUR_DEBUG_LOG)
 	target_compile_definitions(le_controlleur PRIVATE LE_CONTROLLEUR_DEBUG_LOG=1)
@@ -59,6 +56,7 @@ else()
 endif()
 
 target_compile_definitions(le_controlleur PRIVATE
+	BRAIN_USE_ALL=1
 	LE_CONTROLLEUR_DEBUG_LEVEL=${LE_CONTROLLEUR_DEBUG_LEVEL}
 	LE_CONTROLLEUR_VERSION="${LE_CONTROLLEUR_VERSION}"
 	LE_CONTROLLEUR_GIT_HASH="${LE_CONTROLLEUR_GIT_HASH}"
