@@ -11,10 +11,11 @@
 AppController* AppController::instance_ = nullptr;
 
 AppController::AppController() :
-	button_a_(GPIO_BRAIN_BUTTON_1),
-	button_b_(GPIO_BRAIN_BUTTON_2),
+	brain_(),
+
 	mode_(AppMode::kMidiToCv),
-	midi_to_cv_engine_(brain::io::AudioCvOutChannel::kChannelB, 1),
+	midi_to_cv_engine_(brain_, AudioCvOutChannel::kChannelB, 1),
+	sequencer_engine_(brain_),
 	sequencer_midi_parser_(1, false),
 	sequencer_midi_parser_initialized_(false),
 	button_a_pressed_(false),
@@ -34,29 +35,33 @@ AppController::AppController() :
 	status_line_count_(0),
 	status_text_{0} {
 	instance_ = this;
-	button_a_.init();
-	button_b_.init();
 
-	button_a_.set_on_press([this]() { on_button_a_press(); });
-	button_a_.set_on_release([this]() { on_button_a_release(); });
-	button_b_.set_on_press([this]() { on_button_b_press(); });
-	button_b_.set_on_release([this]() { on_button_b_release(); });
+	if (!brain_init_succeeded(brain_.init_buttons())) {
+		LOG_ERROR("APP", "failed to init buttons");
+	}
+
+	brain_.buttons.button_a.set_on_press([this]() { on_button_a_press(); });
+	brain_.buttons.button_a.set_on_release([this]() { on_button_a_release(); });
+	brain_.buttons.button_b.set_on_press([this]() { on_button_b_press(); });
+	brain_.buttons.button_b.set_on_release([this]() { on_button_b_release(); });
 	sequencer_midi_parser_.set_realtime_callback(&AppController::on_sequencer_midi_realtime);
 	sequencer_midi_parser_.set_note_on_callback(&AppController::on_sequencer_midi_note_on);
 	sequencer_midi_parser_.set_channel(midi_to_cv_engine_.get_midi_channel());
 
 	uint8_t persisted_mode = static_cast<uint8_t>(AppMode::kMidiToCv);
-	if (load_persisted_app_mode(persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
+	if (load_persisted_app_mode(brain_.storage, persisted_mode) && persisted_mode == static_cast<uint8_t>(AppMode::kSequencer)) {
 		mode_ = AppMode::kSequencer;
 		ensure_sequencer_midi_parser_initialized();
 		sequencer_midi_parser_.reset();
 		sequencer_engine_.on_mode_enter();
+	} else {
+		midi_to_cv_engine_.on_mode_enter();
 	}
 }
 
 void AppController::update() {
-	button_a_.update();
-	button_b_.update();
+	brain_.buttons.button_a.update();
+	brain_.buttons.button_b.update();
 
 	check_toggle_mode();
 
@@ -81,7 +86,7 @@ void AppController::update() {
 			allow_settings_commit = !sequencer_engine_.is_playing();
 			break;
 	}
-	if (!service_persisted_settings(allow_settings_commit)) {
+	if (!service_persisted_settings(brain_.storage, allow_settings_commit)) {
 		LOG_ERROR("APP", "deferred settings commit failed");
 	}
 
@@ -544,9 +549,11 @@ void AppController::set_mode(AppMode mode) {
 		ensure_sequencer_midi_parser_initialized();
 		sequencer_midi_parser_.reset();
 		sequencer_engine_.on_mode_enter();
+	} else {
+		midi_to_cv_engine_.on_mode_enter();
 	}
 
-	save_persisted_app_mode(static_cast<uint8_t>(mode_));
+	save_persisted_app_mode(brain_.storage, static_cast<uint8_t>(mode_));
 
 	if (!entering_sequencer) {
 		midi_to_cv_engine_.play_startup_animation();
