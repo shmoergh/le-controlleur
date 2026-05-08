@@ -3,10 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_PICO_SDK_PATH="$ROOT_DIR/brain-sdk/pico-sdk"
 TARGET_NAME="le_controlleur"
 OUTPUT_PREFIX="le-controlleur"
 DEBUG_LOG="ON"
 DEBUG_LEVEL="1"
+
+# Always use the repository-local Pico SDK bundled with brain-sdk.
+export PICO_SDK_PATH="$LOCAL_PICO_SDK_PATH"
 
 usage() {
 	echo "Usage: $0 [--no-debug|--debug|--trace]"

@@ -8,3 +8,4 @@ build-pico-2
 *.lck
 **/ai
 wd*.md
+.cache
